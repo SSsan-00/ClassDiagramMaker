@@ -444,6 +444,207 @@ public sealed class ClassDiagramServiceTests
         Assert.DoesNotContain(unexpectedToken3, result.Mermaid);
     }
 
+    [Fact]
+    public async Task GenerateAsync_WhenSplitOutputByNamespace_WritesNamespaceDiagramsAndIndex()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Services/UserService.cs",
+            """
+            namespace Demo.Services;
+
+            public sealed class UserService
+            {
+                private readonly UserRepository repository;
+
+                public Demo.Models.UserDto Create(Demo.Models.CreateUserCommand command) => new();
+            }
+
+            public sealed class UserRepository
+            {
+            }
+            """);
+        workspace.WriteSource(
+            "Models/UserDto.cs",
+            """
+            namespace Demo.Models;
+
+            public sealed class UserDto
+            {
+            }
+
+            public sealed class CreateUserCommand
+            {
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath)
+            {
+                Options = new DiagramGenerationOptions
+                {
+                    SplitOutput = new DiagramSplitOptions(
+                        Enabled: true,
+                        Mode: DiagramSplitMode.Namespace,
+                        IncludeOverview: true,
+                        IncludeIndex: true)
+                }
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        var indexPath = workspace.GetOutputPath(".index.md");
+        var overviewPath = workspace.GetOutputPath(".all.mmd");
+        var servicesPath = workspace.GetOutputPath(".Demo.Services.mmd");
+        var modelsPath = workspace.GetOutputPath(".Demo.Models.mmd");
+
+        Assert.Equal(indexPath, result.OutputPath);
+        Assert.Contains(indexPath, result.OutputPaths);
+        Assert.Contains(overviewPath, result.OutputPaths);
+        Assert.Contains(servicesPath, result.OutputPaths);
+        Assert.Contains(modelsPath, result.OutputPaths);
+
+        var index = File.ReadAllText(indexPath);
+        Assert.Contains("[All](diagram.all.mmd)", index);
+        Assert.Contains("[Demo.Services](diagram.Demo.Services.mmd)", index);
+        Assert.Contains("[Demo.Models](diagram.Demo.Models.mmd)", index);
+
+        var servicesDiagram = File.ReadAllText(servicesPath);
+        Assert.Contains("class Demo_Services_UserService", servicesDiagram);
+        Assert.Contains("class Demo_Services_UserRepository", servicesDiagram);
+        Assert.DoesNotContain("Demo_Models_UserDto", servicesDiagram);
+        Assert.Contains("Demo_Services_UserService --> Demo_Services_UserRepository : repository", servicesDiagram);
+        Assert.DoesNotContain("Demo_Services_UserService ..> Demo_Models_UserDto", servicesDiagram);
+
+        var overviewDiagram = File.ReadAllText(overviewPath);
+        Assert.Contains("class Demo_Models_UserDto", overviewDiagram);
+        Assert.Contains("Demo_Services_UserService ..> Demo_Models_UserDto : Create", overviewDiagram);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WhenSplitOutputByFolder_WritesFolderDiagrams()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Domain/User.cs",
+            """
+            namespace Demo.Domain;
+
+            public sealed class User
+            {
+                public string Name { get; }
+            }
+            """);
+        workspace.WriteSource(
+            "Application/UserService.cs",
+            """
+            namespace Demo.Application;
+
+            public sealed class UserService
+            {
+                public Demo.Domain.User Find() => new();
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath)
+            {
+                Options = new DiagramGenerationOptions
+                {
+                    SplitOutput = new DiagramSplitOptions(
+                        Enabled: true,
+                        Mode: DiagramSplitMode.Folder,
+                        IncludeOverview: false,
+                        IncludeIndex: false)
+                }
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        var domainPath = workspace.GetOutputPath(".Domain.mmd");
+        var applicationPath = workspace.GetOutputPath(".Application.mmd");
+
+        Assert.Equal(applicationPath, result.OutputPath);
+        Assert.Equal(new[] { applicationPath, domainPath }, result.OutputPaths);
+        Assert.False(File.Exists(workspace.GetOutputPath(".index.md")));
+        Assert.False(File.Exists(workspace.GetOutputPath(".all.mmd")));
+
+        var applicationDiagram = File.ReadAllText(applicationPath);
+        Assert.Contains("class Demo_Application_UserService", applicationDiagram);
+        Assert.DoesNotContain("Demo_Domain_User", applicationDiagram);
+        Assert.DoesNotContain("Demo_Application_UserService ..> Demo_Domain_User", applicationDiagram);
+
+        var domainDiagram = File.ReadAllText(domainPath);
+        Assert.Contains("class Demo_Domain_User", domainDiagram);
+        Assert.Contains("+Name: string", domainDiagram);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WhenSplitOutputUsesTypeOnly_AppliesDisplayModeToSplitFiles()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Services/UserService.cs",
+            """
+            namespace Demo.Services;
+
+            public sealed class UserService
+            {
+                public string Name { get; }
+            }
+            """);
+
+        await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath)
+            {
+                Options = new DiagramGenerationOptions(DisplayMode: DiagramDisplayMode.TypeOnly)
+                {
+                    SplitOutput = new DiagramSplitOptions(
+                        Enabled: true,
+                        Mode: DiagramSplitMode.Namespace,
+                        IncludeOverview: false,
+                        IncludeIndex: false)
+                }
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        var servicesDiagram = File.ReadAllText(workspace.GetOutputPath(".Demo.Services.mmd"));
+        Assert.Contains("class Demo_Services_UserService", servicesDiagram);
+        Assert.DoesNotContain("+Name: string", servicesDiagram);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WhenSplitOutputHasNoTypes_WritesEmptyDiagram()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Empty.cs",
+            """
+            namespace Demo;
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath)
+            {
+                Options = new DiagramGenerationOptions
+                {
+                    SplitOutput = new DiagramSplitOptions(
+                        Enabled: true,
+                        Mode: DiagramSplitMode.Namespace,
+                        IncludeOverview: false,
+                        IncludeIndex: false)
+                }
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        var emptyPath = workspace.GetOutputPath(".empty.mmd");
+        Assert.Equal(emptyPath, result.OutputPath);
+        Assert.Equal(new[] { emptyPath }, result.OutputPaths);
+        Assert.Contains("classDiagram", File.ReadAllText(emptyPath));
+    }
+
     private sealed class TestWorkspace : IDisposable
     {
         private TestWorkspace(string root)
@@ -469,6 +670,13 @@ public sealed class ClassDiagramServiceTests
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, source);
             return path;
+        }
+
+        public string GetOutputPath(string suffix)
+        {
+            return Path.Combine(
+                Root,
+                $"{Path.GetFileNameWithoutExtension(OutputPath)}{suffix}");
         }
 
         public void Dispose()

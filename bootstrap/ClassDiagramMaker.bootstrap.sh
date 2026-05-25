@@ -63,6 +63,7 @@ The GUI also provides output options for large projects:
 
 - Display mode: type only, key members, or all members
 - Relationships: inheritance, interface implementation, field/property association, and method dependency can be toggled independently
+- Split output: generate separate Mermaid files by namespace or folder, with optional `index.md` and all-in-one diagram files
 
 When the search file is empty, the tool recursively analyzes `.cs`, `.cshtml.cs`, and `.cshtml` files under the search folder. The GUI shows parsing and rendering progress while the Mermaid file is generated.
 
@@ -113,6 +114,20 @@ The publish profile `win-x64-single-file` is also available:
 ```bash
 dotnet publish src/ClassDiagramMaker/ClassDiagramMaker.csproj -p:PublishProfile=win-x64-single-file
 ```
+
+## Split Output
+
+When split output is enabled, the selected output path is used as a file name prefix.
+For example, `diagram.mmd` can generate:
+
+```text
+diagram.index.md
+diagram.all.mmd
+diagram.Demo.Services.mmd
+diagram.Demo.Models.mmd
+```
+
+Namespace splitting groups types by C# namespace. Folder splitting groups types by their source folder relative to the target project folder. Relationships in split diagrams are limited to types inside the same split file, while the optional `*.all.mmd` keeps the full diagram.
 
 ## Output
 
@@ -266,34 +281,34 @@ public sealed class ClassDiagramService
 
         progress.Report(new GenerationProgress(
             "Rendering",
-            "Rendering Mermaid class diagram...",
+            request.Options.SplitOutput.Enabled
+                ? "Rendering Mermaid class diagrams..."
+                : "Rendering Mermaid class diagram...",
             90,
             files.Count,
             files.Count));
 
         var displayTypes = ApplyDisplayMode(types, request.Options.DisplayMode);
         var mermaid = MermaidRenderer.Render(displayTypes, relationships);
-
-        var outputDirectory = Path.GetDirectoryName(options.OutputPath);
-        if (!string.IsNullOrWhiteSpace(outputDirectory))
-        {
-            Directory.CreateDirectory(outputDirectory);
-        }
-
-        await File.WriteAllTextAsync(options.OutputPath, mermaid, new UTF8Encoding(false), cancellationToken);
+        var output = request.Options.SplitOutput.Enabled
+            ? await WriteSplitOutputAsync(options, request.Options.SplitOutput, displayTypes, relationships, mermaid, cancellationToken)
+            : await WriteSingleOutputAsync(options.OutputPath, mermaid, cancellationToken);
 
         progress.Report(new GenerationProgress(
             "Writing",
-            $"Wrote {options.OutputPath}",
+            $"Wrote {output.OutputPaths.Count} output file(s).",
             100,
             files.Count,
             files.Count));
 
         return new GenerationResult(
-            options.OutputPath,
-            mermaid,
+            output.PrimaryPath,
+            output.PreviewMermaid,
             types.Count,
-            relationships.Count);
+            relationships.Count)
+        {
+            OutputPaths = output.OutputPaths
+        };
     }
 
     private static NormalizedGenerationRequest NormalizeRequest(GenerationRequest request)
@@ -496,11 +511,239 @@ public sealed class ClassDiagramService
         };
     }
 
+    private static async Task<GeneratedOutput> WriteSingleOutputAsync(
+        string outputPath,
+        string mermaid,
+        CancellationToken cancellationToken)
+    {
+        EnsureOutputDirectory(outputPath);
+        await File.WriteAllTextAsync(outputPath, mermaid, new UTF8Encoding(false), cancellationToken);
+        return new GeneratedOutput(outputPath, mermaid, new[] { outputPath });
+    }
+
+    private static async Task<GeneratedOutput> WriteSplitOutputAsync(
+        NormalizedGenerationRequest request,
+        DiagramSplitOptions splitOptions,
+        IReadOnlyList<DiagramType> displayTypes,
+        IReadOnlyList<DiagramRelationship> relationships,
+        string overviewMermaid,
+        CancellationToken cancellationToken)
+    {
+        EnsureOutputDirectory(request.OutputPath);
+
+        var outputs = new List<string>();
+        var splitDiagrams = CreateSplitDiagrams(request, splitOptions, displayTypes, relationships);
+        var overviewPath = CreateSiblingOutputPath(request.OutputPath, "all", ".mmd");
+        var indexPath = CreateSiblingOutputPath(request.OutputPath, "index", ".md");
+        var fallbackPath = CreateSiblingOutputPath(request.OutputPath, "empty", ".mmd");
+
+        if (splitOptions.IncludeOverview)
+        {
+            await File.WriteAllTextAsync(overviewPath, overviewMermaid, new UTF8Encoding(false), cancellationToken);
+            outputs.Add(overviewPath);
+        }
+
+        if (splitDiagrams.Count == 0 && !splitOptions.IncludeOverview && !splitOptions.IncludeIndex)
+        {
+            await File.WriteAllTextAsync(fallbackPath, overviewMermaid, new UTF8Encoding(false), cancellationToken);
+            outputs.Add(fallbackPath);
+        }
+
+        foreach (var diagram in splitDiagrams)
+        {
+            await File.WriteAllTextAsync(diagram.Path, diagram.Mermaid, new UTF8Encoding(false), cancellationToken);
+            outputs.Add(diagram.Path);
+        }
+
+        if (splitOptions.IncludeIndex)
+        {
+            var index = RenderSplitIndex(indexPath, splitOptions, splitDiagrams, splitOptions.IncludeOverview ? overviewPath : null);
+            await File.WriteAllTextAsync(indexPath, index, new UTF8Encoding(false), cancellationToken);
+            outputs.Insert(0, indexPath);
+        }
+
+        var primaryPath = splitOptions.IncludeIndex
+            ? indexPath
+            : splitOptions.IncludeOverview
+                ? overviewPath
+                : splitDiagrams.Count > 0
+                    ? splitDiagrams.First().Path
+                    : fallbackPath;
+        var previewMermaid = splitOptions.IncludeOverview || splitDiagrams.Count == 0
+            ? overviewMermaid
+            : splitDiagrams.First().Mermaid;
+
+        return new GeneratedOutput(primaryPath, previewMermaid, outputs);
+    }
+
+    private static IReadOnlyList<SplitDiagram> CreateSplitDiagrams(
+        NormalizedGenerationRequest request,
+        DiagramSplitOptions splitOptions,
+        IReadOnlyList<DiagramType> displayTypes,
+        IReadOnlyList<DiagramRelationship> relationships)
+    {
+        var groups = displayTypes
+            .GroupBy(type => GetSplitGroupName(type, request.ProjectFolder, splitOptions.Mode), StringComparer.Ordinal)
+            .OrderBy(group => group.Key, StringComparer.Ordinal)
+            .ToArray();
+        var usedSuffixes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var diagrams = new List<SplitDiagram>();
+
+        foreach (var group in groups)
+        {
+            var groupTypes = group
+                .OrderBy(type => type.FullName, StringComparer.Ordinal)
+                .ToArray();
+            var typeIds = groupTypes.Select(type => type.Id).ToHashSet(StringComparer.Ordinal);
+            var groupRelationships = relationships
+                .Where(relationship => typeIds.Contains(relationship.FromTypeId) && typeIds.Contains(relationship.ToTypeId))
+                .ToArray();
+            var fileSuffix = CreateUniqueFileSuffix(SanitizeFileSuffix(group.Key), usedSuffixes);
+            var path = CreateSiblingOutputPath(request.OutputPath, fileSuffix, ".mmd");
+
+            diagrams.Add(new SplitDiagram(
+                group.Key,
+                path,
+                MermaidRenderer.Render(groupTypes, groupRelationships),
+                groupTypes.Length,
+                groupRelationships.Length));
+        }
+
+        return diagrams;
+    }
+
+    private static string GetSplitGroupName(
+        DiagramType type,
+        string projectFolder,
+        DiagramSplitMode mode)
+    {
+        return mode switch
+        {
+            DiagramSplitMode.Namespace => string.IsNullOrWhiteSpace(type.Namespace) ? "Global" : type.Namespace,
+            DiagramSplitMode.Folder => GetFolderGroupName(type.SourceFile, projectFolder),
+            _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
+        };
+    }
+
+    private static string GetFolderGroupName(string sourceFile, string projectFolder)
+    {
+        var primarySourceFile = sourceFile
+            .Split(", ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault() ?? sourceFile;
+        var relativePath = Path.GetRelativePath(projectFolder, primarySourceFile);
+        var relativeDirectory = Path.GetDirectoryName(relativePath);
+        if (string.IsNullOrWhiteSpace(relativeDirectory) || relativeDirectory == ".")
+        {
+            return "Root";
+        }
+
+        return string.Join(
+            ".",
+            relativeDirectory
+                .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                .Where(part => !string.IsNullOrWhiteSpace(part)));
+    }
+
+    private static string RenderSplitIndex(
+        string indexPath,
+        DiagramSplitOptions splitOptions,
+        IReadOnlyList<SplitDiagram> splitDiagrams,
+        string? overviewPath)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("# Class Diagram Index");
+        builder.AppendLine();
+        builder.AppendLine($"Split mode: `{splitOptions.Mode}`");
+        builder.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(overviewPath))
+        {
+            builder.AppendLine($"- [All]({ToMarkdownLinkTarget(indexPath, overviewPath)})");
+        }
+
+        foreach (var diagram in splitDiagrams)
+        {
+            builder.AppendLine($"- [{diagram.Name}]({ToMarkdownLinkTarget(indexPath, diagram.Path)}) - {diagram.TypeCount} type(s), {diagram.RelationshipCount} relationship(s)");
+        }
+
+        return builder.ToString();
+    }
+
+    private static string ToMarkdownLinkTarget(string fromPath, string toPath)
+    {
+        var fromDirectory = Path.GetDirectoryName(fromPath);
+        var relativePath = string.IsNullOrWhiteSpace(fromDirectory)
+            ? Path.GetFileName(toPath)
+            : Path.GetRelativePath(fromDirectory, toPath);
+
+        return relativePath
+            .Replace(Path.DirectorySeparatorChar, '/')
+            .Replace(Path.AltDirectorySeparatorChar, '/');
+    }
+
+    private static string CreateSiblingOutputPath(string outputPath, string suffix, string extension)
+    {
+        var outputDirectory = Path.GetDirectoryName(outputPath);
+        var baseName = Path.GetFileNameWithoutExtension(outputPath);
+        return string.IsNullOrWhiteSpace(outputDirectory)
+            ? $"{baseName}.{suffix}{extension}"
+            : Path.Combine(outputDirectory, $"{baseName}.{suffix}{extension}");
+    }
+
+    private static string SanitizeFileSuffix(string value)
+    {
+        var invalidCharacters = Path.GetInvalidFileNameChars()
+            .Concat(new[] { '<', '>', ':', '"', '/', '\\', '|', '?', '*' })
+            .ToHashSet();
+        var sanitized = new string(value
+            .Select(character => char.IsWhiteSpace(character) || invalidCharacters.Contains(character) ? '_' : character)
+            .ToArray())
+            .Trim('_', '.');
+
+        return string.IsNullOrWhiteSpace(sanitized) ? "Global" : sanitized;
+    }
+
+    private static string CreateUniqueFileSuffix(
+        string preferredSuffix,
+        Dictionary<string, int> usedSuffixes)
+    {
+        if (!usedSuffixes.TryGetValue(preferredSuffix, out var count))
+        {
+            usedSuffixes[preferredSuffix] = 1;
+            return preferredSuffix;
+        }
+
+        count++;
+        usedSuffixes[preferredSuffix] = count;
+        return $"{preferredSuffix}_{count}";
+    }
+
+    private static void EnsureOutputDirectory(string outputPath)
+    {
+        var outputDirectory = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            Directory.CreateDirectory(outputDirectory);
+        }
+    }
+
     private sealed record NormalizedGenerationRequest(
         string ProjectFolder,
         string SearchFolder,
         string? SearchFile,
         string OutputPath);
+
+    private sealed record GeneratedOutput(
+        string PrimaryPath,
+        string PreviewMermaid,
+        IReadOnlyList<string> OutputPaths);
+
+    private sealed record SplitDiagram(
+        string Name,
+        string Path,
+        string Mermaid,
+        int TypeCount,
+        int RelationshipCount);
 }
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
@@ -606,6 +849,23 @@ public sealed record DiagramGenerationOptions(
     bool IncludeDependency = true)
 {
     public static DiagramGenerationOptions Default { get; } = new();
+
+    public DiagramSplitOptions SplitOutput { get; init; } = DiagramSplitOptions.Disabled;
+}
+
+public enum DiagramSplitMode
+{
+    Namespace,
+    Folder
+}
+
+public sealed record DiagramSplitOptions(
+    bool Enabled = false,
+    DiagramSplitMode Mode = DiagramSplitMode.Namespace,
+    bool IncludeOverview = true,
+    bool IncludeIndex = true)
+{
+    public static DiagramSplitOptions Disabled { get; } = new();
 }
 
 public sealed record GenerationProgress(
@@ -619,7 +879,10 @@ public sealed record GenerationResult(
     string OutputPath,
     string Mermaid,
     int TypeCount,
-    int RelationshipCount);
+    int RelationshipCount)
+{
+    public IReadOnlyList<string> OutputPaths { get; init; } = Array.Empty<string>();
+}
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
@@ -1670,6 +1933,10 @@ public sealed class MainForm : Form
     private readonly CheckBox _includeRealizationCheckBox = new();
     private readonly CheckBox _includeAssociationCheckBox = new();
     private readonly CheckBox _includeDependencyCheckBox = new();
+    private readonly CheckBox _splitOutputCheckBox = new();
+    private readonly ComboBox _splitModeComboBox = new();
+    private readonly CheckBox _includeSplitOverviewCheckBox = new();
+    private readonly CheckBox _includeSplitIndexCheckBox = new();
     private readonly Button _generateButton = new();
     private readonly Button _cancelButton = new();
     private readonly ProgressBar _progressBar = new();
@@ -1786,10 +2053,14 @@ public sealed class MainForm : Form
             Dock = DockStyle.Fill,
             AutoSize = true,
             ColumnCount = 2,
-            RowCount = 2
+            RowCount = 5
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        for (var row = 0; row < 5; row++)
+        {
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        }
 
         var displayLabel = new Label
         {
@@ -1836,11 +2107,69 @@ public sealed class MainForm : Form
         relationshipPanel.Controls.Add(_includeAssociationCheckBox);
         relationshipPanel.Controls.Add(_includeDependencyCheckBox);
 
+        var splitLabel = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "分割出力"
+        };
+
+        ConfigureRelationshipCheckBox(_splitOutputCheckBox, "分割して出力", checkedByDefault: false);
+        _splitOutputCheckBox.CheckedChanged += (_, _) => UpdateSplitOptionState();
+
+        var splitModeLabel = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "分割単位"
+        };
+
+        _splitModeComboBox.Dock = DockStyle.Left;
+        _splitModeComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _splitModeComboBox.Width = 220;
+        _splitModeComboBox.Items.AddRange(new object[]
+        {
+            "namespace",
+            "フォルダ"
+        });
+        _splitModeComboBox.SelectedIndex = 0;
+
+        var splitFileLabel = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "分割ファイル"
+        };
+
+        var splitFilePanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true
+        };
+
+        ConfigureRelationshipCheckBox(_includeSplitOverviewCheckBox, "全体図も出力", checkedByDefault: true);
+        ConfigureRelationshipCheckBox(_includeSplitIndexCheckBox, "index.md を出力", checkedByDefault: true);
+
+        splitFilePanel.Controls.Add(_includeSplitOverviewCheckBox);
+        splitFilePanel.Controls.Add(_includeSplitIndexCheckBox);
+
         panel.Controls.Add(displayLabel, 0, 0);
         panel.Controls.Add(_displayModeComboBox, 1, 0);
         panel.Controls.Add(relationshipLabel, 0, 1);
         panel.Controls.Add(relationshipPanel, 1, 1);
+        panel.Controls.Add(splitLabel, 0, 2);
+        panel.Controls.Add(_splitOutputCheckBox, 1, 2);
+        panel.Controls.Add(splitModeLabel, 0, 3);
+        panel.Controls.Add(_splitModeComboBox, 1, 3);
+        panel.Controls.Add(splitFileLabel, 0, 4);
+        panel.Controls.Add(splitFilePanel, 1, 4);
 
+        UpdateSplitOptionState();
         group.Controls.Add(panel);
         return group;
     }
@@ -2094,10 +2423,16 @@ public sealed class MainForm : Form
                 () => _service.GenerateAsync(request, progress, _generationCancellation.Token));
 
             _mermaidTextBox.Text = result.Mermaid;
-            _outputLabel.Text = $"出力: {result.OutputPath}";
+            _outputLabel.Text = result.OutputPaths.Count > 1
+                ? $"出力: {result.OutputPath} ({result.OutputPaths.Count} files)"
+                : $"出力: {result.OutputPath}";
             _stageLabel.Text = "完了";
             _messageLabel.Text = $"生成完了: {result.TypeCount} types, {result.RelationshipCount} relationships";
             AppendLog($"Wrote {result.OutputPath}");
+            foreach (var outputPath in result.OutputPaths.Skip(1))
+            {
+                AppendLog($"Wrote {outputPath}");
+            }
         }
         catch (OperationCanceledException)
         {
@@ -2165,6 +2500,13 @@ public sealed class MainForm : Form
                 IncludeRealization: _includeRealizationCheckBox.Checked,
                 IncludeAssociation: _includeAssociationCheckBox.Checked,
                 IncludeDependency: _includeDependencyCheckBox.Checked)
+            {
+                SplitOutput = new DiagramSplitOptions(
+                    Enabled: _splitOutputCheckBox.Checked,
+                    Mode: GetSelectedSplitMode(),
+                    IncludeOverview: _includeSplitOverviewCheckBox.Checked,
+                    IncludeIndex: _includeSplitIndexCheckBox.Checked)
+            }
         };
         return true;
     }
@@ -2177,6 +2519,23 @@ public sealed class MainForm : Form
             1 => DiagramDisplayMode.KeyMembers,
             _ => DiagramDisplayMode.AllMembers
         };
+    }
+
+    private DiagramSplitMode GetSelectedSplitMode()
+    {
+        return _splitModeComboBox.SelectedIndex switch
+        {
+            1 => DiagramSplitMode.Folder,
+            _ => DiagramSplitMode.Namespace
+        };
+    }
+
+    private void UpdateSplitOptionState()
+    {
+        var enabled = _splitOutputCheckBox.Checked;
+        _splitModeComboBox.Enabled = enabled;
+        _includeSplitOverviewCheckBox.Enabled = enabled;
+        _includeSplitIndexCheckBox.Enabled = enabled;
     }
 
     private void ShowValidationError(string message)

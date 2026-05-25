@@ -24,6 +24,23 @@ public sealed record DiagramGenerationOptions(
     bool IncludeDependency = true)
 {
     public static DiagramGenerationOptions Default { get; } = new();
+
+    public DiagramSplitOptions SplitOutput { get; init; } = DiagramSplitOptions.Disabled;
+}
+
+public enum DiagramSplitMode
+{
+    Namespace,
+    Folder
+}
+
+public sealed record DiagramSplitOptions(
+    bool Enabled = false,
+    DiagramSplitMode Mode = DiagramSplitMode.Namespace,
+    bool IncludeOverview = true,
+    bool IncludeIndex = true)
+{
+    public static DiagramSplitOptions Disabled { get; } = new();
 }
 
 public sealed record GenerationProgress(
@@ -37,4 +54,7 @@ public sealed record GenerationResult(
     string OutputPath,
     string Mermaid,
     int TypeCount,
-    int RelationshipCount);
+    int RelationshipCount)
+{
+    public IReadOnlyList<string> OutputPaths { get; init; } = Array.Empty<string>();
+}

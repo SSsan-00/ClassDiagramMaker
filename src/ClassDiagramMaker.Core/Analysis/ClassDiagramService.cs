@@ -88,34 +88,34 @@ public sealed class ClassDiagramService
 
         progress.Report(new GenerationProgress(
             "Rendering",
-            "Rendering Mermaid class diagram...",
+            request.Options.SplitOutput.Enabled
+                ? "Rendering Mermaid class diagrams..."
+                : "Rendering Mermaid class diagram...",
             90,
             files.Count,
             files.Count));
 
         var displayTypes = ApplyDisplayMode(types, request.Options.DisplayMode);
         var mermaid = MermaidRenderer.Render(displayTypes, relationships);
-
-        var outputDirectory = Path.GetDirectoryName(options.OutputPath);
-        if (!string.IsNullOrWhiteSpace(outputDirectory))
-        {
-            Directory.CreateDirectory(outputDirectory);
-        }
-
-        await File.WriteAllTextAsync(options.OutputPath, mermaid, new UTF8Encoding(false), cancellationToken);
+        var output = request.Options.SplitOutput.Enabled
+            ? await WriteSplitOutputAsync(options, request.Options.SplitOutput, displayTypes, relationships, mermaid, cancellationToken)
+            : await WriteSingleOutputAsync(options.OutputPath, mermaid, cancellationToken);
 
         progress.Report(new GenerationProgress(
             "Writing",
-            $"Wrote {options.OutputPath}",
+            $"Wrote {output.OutputPaths.Count} output file(s).",
             100,
             files.Count,
             files.Count));
 
         return new GenerationResult(
-            options.OutputPath,
-            mermaid,
+            output.PrimaryPath,
+            output.PreviewMermaid,
             types.Count,
-            relationships.Count);
+            relationships.Count)
+        {
+            OutputPaths = output.OutputPaths
+        };
     }
 
     private static NormalizedGenerationRequest NormalizeRequest(GenerationRequest request)
@@ -318,9 +318,237 @@ public sealed class ClassDiagramService
         };
     }
 
+    private static async Task<GeneratedOutput> WriteSingleOutputAsync(
+        string outputPath,
+        string mermaid,
+        CancellationToken cancellationToken)
+    {
+        EnsureOutputDirectory(outputPath);
+        await File.WriteAllTextAsync(outputPath, mermaid, new UTF8Encoding(false), cancellationToken);
+        return new GeneratedOutput(outputPath, mermaid, new[] { outputPath });
+    }
+
+    private static async Task<GeneratedOutput> WriteSplitOutputAsync(
+        NormalizedGenerationRequest request,
+        DiagramSplitOptions splitOptions,
+        IReadOnlyList<DiagramType> displayTypes,
+        IReadOnlyList<DiagramRelationship> relationships,
+        string overviewMermaid,
+        CancellationToken cancellationToken)
+    {
+        EnsureOutputDirectory(request.OutputPath);
+
+        var outputs = new List<string>();
+        var splitDiagrams = CreateSplitDiagrams(request, splitOptions, displayTypes, relationships);
+        var overviewPath = CreateSiblingOutputPath(request.OutputPath, "all", ".mmd");
+        var indexPath = CreateSiblingOutputPath(request.OutputPath, "index", ".md");
+        var fallbackPath = CreateSiblingOutputPath(request.OutputPath, "empty", ".mmd");
+
+        if (splitOptions.IncludeOverview)
+        {
+            await File.WriteAllTextAsync(overviewPath, overviewMermaid, new UTF8Encoding(false), cancellationToken);
+            outputs.Add(overviewPath);
+        }
+
+        if (splitDiagrams.Count == 0 && !splitOptions.IncludeOverview && !splitOptions.IncludeIndex)
+        {
+            await File.WriteAllTextAsync(fallbackPath, overviewMermaid, new UTF8Encoding(false), cancellationToken);
+            outputs.Add(fallbackPath);
+        }
+
+        foreach (var diagram in splitDiagrams)
+        {
+            await File.WriteAllTextAsync(diagram.Path, diagram.Mermaid, new UTF8Encoding(false), cancellationToken);
+            outputs.Add(diagram.Path);
+        }
+
+        if (splitOptions.IncludeIndex)
+        {
+            var index = RenderSplitIndex(indexPath, splitOptions, splitDiagrams, splitOptions.IncludeOverview ? overviewPath : null);
+            await File.WriteAllTextAsync(indexPath, index, new UTF8Encoding(false), cancellationToken);
+            outputs.Insert(0, indexPath);
+        }
+
+        var primaryPath = splitOptions.IncludeIndex
+            ? indexPath
+            : splitOptions.IncludeOverview
+                ? overviewPath
+                : splitDiagrams.Count > 0
+                    ? splitDiagrams.First().Path
+                    : fallbackPath;
+        var previewMermaid = splitOptions.IncludeOverview || splitDiagrams.Count == 0
+            ? overviewMermaid
+            : splitDiagrams.First().Mermaid;
+
+        return new GeneratedOutput(primaryPath, previewMermaid, outputs);
+    }
+
+    private static IReadOnlyList<SplitDiagram> CreateSplitDiagrams(
+        NormalizedGenerationRequest request,
+        DiagramSplitOptions splitOptions,
+        IReadOnlyList<DiagramType> displayTypes,
+        IReadOnlyList<DiagramRelationship> relationships)
+    {
+        var groups = displayTypes
+            .GroupBy(type => GetSplitGroupName(type, request.ProjectFolder, splitOptions.Mode), StringComparer.Ordinal)
+            .OrderBy(group => group.Key, StringComparer.Ordinal)
+            .ToArray();
+        var usedSuffixes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var diagrams = new List<SplitDiagram>();
+
+        foreach (var group in groups)
+        {
+            var groupTypes = group
+                .OrderBy(type => type.FullName, StringComparer.Ordinal)
+                .ToArray();
+            var typeIds = groupTypes.Select(type => type.Id).ToHashSet(StringComparer.Ordinal);
+            var groupRelationships = relationships
+                .Where(relationship => typeIds.Contains(relationship.FromTypeId) && typeIds.Contains(relationship.ToTypeId))
+                .ToArray();
+            var fileSuffix = CreateUniqueFileSuffix(SanitizeFileSuffix(group.Key), usedSuffixes);
+            var path = CreateSiblingOutputPath(request.OutputPath, fileSuffix, ".mmd");
+
+            diagrams.Add(new SplitDiagram(
+                group.Key,
+                path,
+                MermaidRenderer.Render(groupTypes, groupRelationships),
+                groupTypes.Length,
+                groupRelationships.Length));
+        }
+
+        return diagrams;
+    }
+
+    private static string GetSplitGroupName(
+        DiagramType type,
+        string projectFolder,
+        DiagramSplitMode mode)
+    {
+        return mode switch
+        {
+            DiagramSplitMode.Namespace => string.IsNullOrWhiteSpace(type.Namespace) ? "Global" : type.Namespace,
+            DiagramSplitMode.Folder => GetFolderGroupName(type.SourceFile, projectFolder),
+            _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
+        };
+    }
+
+    private static string GetFolderGroupName(string sourceFile, string projectFolder)
+    {
+        var primarySourceFile = sourceFile
+            .Split(", ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault() ?? sourceFile;
+        var relativePath = Path.GetRelativePath(projectFolder, primarySourceFile);
+        var relativeDirectory = Path.GetDirectoryName(relativePath);
+        if (string.IsNullOrWhiteSpace(relativeDirectory) || relativeDirectory == ".")
+        {
+            return "Root";
+        }
+
+        return string.Join(
+            ".",
+            relativeDirectory
+                .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                .Where(part => !string.IsNullOrWhiteSpace(part)));
+    }
+
+    private static string RenderSplitIndex(
+        string indexPath,
+        DiagramSplitOptions splitOptions,
+        IReadOnlyList<SplitDiagram> splitDiagrams,
+        string? overviewPath)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("# Class Diagram Index");
+        builder.AppendLine();
+        builder.AppendLine($"Split mode: `{splitOptions.Mode}`");
+        builder.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(overviewPath))
+        {
+            builder.AppendLine($"- [All]({ToMarkdownLinkTarget(indexPath, overviewPath)})");
+        }
+
+        foreach (var diagram in splitDiagrams)
+        {
+            builder.AppendLine($"- [{diagram.Name}]({ToMarkdownLinkTarget(indexPath, diagram.Path)}) - {diagram.TypeCount} type(s), {diagram.RelationshipCount} relationship(s)");
+        }
+
+        return builder.ToString();
+    }
+
+    private static string ToMarkdownLinkTarget(string fromPath, string toPath)
+    {
+        var fromDirectory = Path.GetDirectoryName(fromPath);
+        var relativePath = string.IsNullOrWhiteSpace(fromDirectory)
+            ? Path.GetFileName(toPath)
+            : Path.GetRelativePath(fromDirectory, toPath);
+
+        return relativePath
+            .Replace(Path.DirectorySeparatorChar, '/')
+            .Replace(Path.AltDirectorySeparatorChar, '/');
+    }
+
+    private static string CreateSiblingOutputPath(string outputPath, string suffix, string extension)
+    {
+        var outputDirectory = Path.GetDirectoryName(outputPath);
+        var baseName = Path.GetFileNameWithoutExtension(outputPath);
+        return string.IsNullOrWhiteSpace(outputDirectory)
+            ? $"{baseName}.{suffix}{extension}"
+            : Path.Combine(outputDirectory, $"{baseName}.{suffix}{extension}");
+    }
+
+    private static string SanitizeFileSuffix(string value)
+    {
+        var invalidCharacters = Path.GetInvalidFileNameChars()
+            .Concat(new[] { '<', '>', ':', '"', '/', '\\', '|', '?', '*' })
+            .ToHashSet();
+        var sanitized = new string(value
+            .Select(character => char.IsWhiteSpace(character) || invalidCharacters.Contains(character) ? '_' : character)
+            .ToArray())
+            .Trim('_', '.');
+
+        return string.IsNullOrWhiteSpace(sanitized) ? "Global" : sanitized;
+    }
+
+    private static string CreateUniqueFileSuffix(
+        string preferredSuffix,
+        Dictionary<string, int> usedSuffixes)
+    {
+        if (!usedSuffixes.TryGetValue(preferredSuffix, out var count))
+        {
+            usedSuffixes[preferredSuffix] = 1;
+            return preferredSuffix;
+        }
+
+        count++;
+        usedSuffixes[preferredSuffix] = count;
+        return $"{preferredSuffix}_{count}";
+    }
+
+    private static void EnsureOutputDirectory(string outputPath)
+    {
+        var outputDirectory = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            Directory.CreateDirectory(outputDirectory);
+        }
+    }
+
     private sealed record NormalizedGenerationRequest(
         string ProjectFolder,
         string SearchFolder,
         string? SearchFile,
         string OutputPath);
+
+    private sealed record GeneratedOutput(
+        string PrimaryPath,
+        string PreviewMermaid,
+        IReadOnlyList<string> OutputPaths);
+
+    private sealed record SplitDiagram(
+        string Name,
+        string Path,
+        string Mermaid,
+        int TypeCount,
+        int RelationshipCount);
 }

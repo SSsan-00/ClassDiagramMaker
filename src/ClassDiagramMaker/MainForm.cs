@@ -14,6 +14,10 @@ public sealed class MainForm : Form
     private readonly CheckBox _includeRealizationCheckBox = new();
     private readonly CheckBox _includeAssociationCheckBox = new();
     private readonly CheckBox _includeDependencyCheckBox = new();
+    private readonly CheckBox _splitOutputCheckBox = new();
+    private readonly ComboBox _splitModeComboBox = new();
+    private readonly CheckBox _includeSplitOverviewCheckBox = new();
+    private readonly CheckBox _includeSplitIndexCheckBox = new();
     private readonly Button _generateButton = new();
     private readonly Button _cancelButton = new();
     private readonly ProgressBar _progressBar = new();
@@ -130,10 +134,14 @@ public sealed class MainForm : Form
             Dock = DockStyle.Fill,
             AutoSize = true,
             ColumnCount = 2,
-            RowCount = 2
+            RowCount = 5
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        for (var row = 0; row < 5; row++)
+        {
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        }
 
         var displayLabel = new Label
         {
@@ -180,11 +188,69 @@ public sealed class MainForm : Form
         relationshipPanel.Controls.Add(_includeAssociationCheckBox);
         relationshipPanel.Controls.Add(_includeDependencyCheckBox);
 
+        var splitLabel = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "分割出力"
+        };
+
+        ConfigureRelationshipCheckBox(_splitOutputCheckBox, "分割して出力", checkedByDefault: false);
+        _splitOutputCheckBox.CheckedChanged += (_, _) => UpdateSplitOptionState();
+
+        var splitModeLabel = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "分割単位"
+        };
+
+        _splitModeComboBox.Dock = DockStyle.Left;
+        _splitModeComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _splitModeComboBox.Width = 220;
+        _splitModeComboBox.Items.AddRange(new object[]
+        {
+            "namespace",
+            "フォルダ"
+        });
+        _splitModeComboBox.SelectedIndex = 0;
+
+        var splitFileLabel = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "分割ファイル"
+        };
+
+        var splitFilePanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true
+        };
+
+        ConfigureRelationshipCheckBox(_includeSplitOverviewCheckBox, "全体図も出力", checkedByDefault: true);
+        ConfigureRelationshipCheckBox(_includeSplitIndexCheckBox, "index.md を出力", checkedByDefault: true);
+
+        splitFilePanel.Controls.Add(_includeSplitOverviewCheckBox);
+        splitFilePanel.Controls.Add(_includeSplitIndexCheckBox);
+
         panel.Controls.Add(displayLabel, 0, 0);
         panel.Controls.Add(_displayModeComboBox, 1, 0);
         panel.Controls.Add(relationshipLabel, 0, 1);
         panel.Controls.Add(relationshipPanel, 1, 1);
+        panel.Controls.Add(splitLabel, 0, 2);
+        panel.Controls.Add(_splitOutputCheckBox, 1, 2);
+        panel.Controls.Add(splitModeLabel, 0, 3);
+        panel.Controls.Add(_splitModeComboBox, 1, 3);
+        panel.Controls.Add(splitFileLabel, 0, 4);
+        panel.Controls.Add(splitFilePanel, 1, 4);
 
+        UpdateSplitOptionState();
         group.Controls.Add(panel);
         return group;
     }
@@ -438,10 +504,16 @@ public sealed class MainForm : Form
                 () => _service.GenerateAsync(request, progress, _generationCancellation.Token));
 
             _mermaidTextBox.Text = result.Mermaid;
-            _outputLabel.Text = $"出力: {result.OutputPath}";
+            _outputLabel.Text = result.OutputPaths.Count > 1
+                ? $"出力: {result.OutputPath} ({result.OutputPaths.Count} files)"
+                : $"出力: {result.OutputPath}";
             _stageLabel.Text = "完了";
             _messageLabel.Text = $"生成完了: {result.TypeCount} types, {result.RelationshipCount} relationships";
             AppendLog($"Wrote {result.OutputPath}");
+            foreach (var outputPath in result.OutputPaths.Skip(1))
+            {
+                AppendLog($"Wrote {outputPath}");
+            }
         }
         catch (OperationCanceledException)
         {
@@ -509,6 +581,13 @@ public sealed class MainForm : Form
                 IncludeRealization: _includeRealizationCheckBox.Checked,
                 IncludeAssociation: _includeAssociationCheckBox.Checked,
                 IncludeDependency: _includeDependencyCheckBox.Checked)
+            {
+                SplitOutput = new DiagramSplitOptions(
+                    Enabled: _splitOutputCheckBox.Checked,
+                    Mode: GetSelectedSplitMode(),
+                    IncludeOverview: _includeSplitOverviewCheckBox.Checked,
+                    IncludeIndex: _includeSplitIndexCheckBox.Checked)
+            }
         };
         return true;
     }
@@ -521,6 +600,23 @@ public sealed class MainForm : Form
             1 => DiagramDisplayMode.KeyMembers,
             _ => DiagramDisplayMode.AllMembers
         };
+    }
+
+    private DiagramSplitMode GetSelectedSplitMode()
+    {
+        return _splitModeComboBox.SelectedIndex switch
+        {
+            1 => DiagramSplitMode.Folder,
+            _ => DiagramSplitMode.Namespace
+        };
+    }
+
+    private void UpdateSplitOptionState()
+    {
+        var enabled = _splitOutputCheckBox.Checked;
+        _splitModeComboBox.Enabled = enabled;
+        _includeSplitOverviewCheckBox.Enabled = enabled;
+        _includeSplitIndexCheckBox.Enabled = enabled;
     }
 
     private void ShowValidationError(string message)

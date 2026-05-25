@@ -29,6 +29,7 @@ The GUI also provides output options for large projects:
 
 - Display mode: type only, key members, or all members
 - Relationships: inheritance, interface implementation, field/property association, and method dependency can be toggled independently
+- Split output: generate separate Mermaid files by namespace or folder, with optional `index.md` and all-in-one diagram files
 
 When the search file is empty, the tool recursively analyzes `.cs`, `.cshtml.cs`, and `.cshtml` files under the search folder. The GUI shows parsing and rendering progress while the Mermaid file is generated.
 
@@ -79,6 +80,20 @@ The publish profile `win-x64-single-file` is also available:
 ```bash
 dotnet publish src/ClassDiagramMaker/ClassDiagramMaker.csproj -p:PublishProfile=win-x64-single-file
 ```
+
+## Split Output
+
+When split output is enabled, the selected output path is used as a file name prefix.
+For example, `diagram.mmd` can generate:
+
+```text
+diagram.index.md
+diagram.all.mmd
+diagram.Demo.Services.mmd
+diagram.Demo.Models.mmd
+```
+
+Namespace splitting groups types by C# namespace. Folder splitting groups types by their source folder relative to the target project folder. Relationships in split diagrams are limited to types inside the same split file, while the optional `*.all.mmd` keeps the full diagram.
 
 ## Output
 
