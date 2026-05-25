@@ -2,7 +2,9 @@ namespace ClassDiagramMaker.Analysis;
 
 internal static class RelationshipBuilder
 {
-    public static IReadOnlyList<DiagramRelationship> Build(IReadOnlyList<DiagramType> types)
+    public static IReadOnlyList<DiagramRelationship> Build(
+        IReadOnlyList<DiagramType> types,
+        DiagramGenerationOptions options)
     {
         var index = TypeIndex.Create(types);
         var relationships = new List<DiagramRelationship>();
@@ -17,11 +19,18 @@ internal static class RelationshipBuilder
                     continue;
                 }
 
+                var kind = target.Kind == DiagramTypeKind.Interface && type.Kind != DiagramTypeKind.Interface
+                    ? DiagramRelationshipKind.Realization
+                    : DiagramRelationshipKind.Inheritance;
+
+                if (!ShouldInclude(kind, options))
+                {
+                    continue;
+                }
+
                 relationships.Add(new DiagramRelationship
                 {
-                    Kind = target.Kind == DiagramTypeKind.Interface && type.Kind != DiagramTypeKind.Interface
-                        ? DiagramRelationshipKind.Realization
-                        : DiagramRelationshipKind.Inheritance,
+                    Kind = kind,
                     FromTypeId = type.Id,
                     ToTypeId = target.Id
                 });
@@ -37,11 +46,18 @@ internal static class RelationshipBuilder
                         continue;
                     }
 
+                    var kind = member.Kind is DiagramMemberKind.Field or DiagramMemberKind.Property or DiagramMemberKind.Event
+                        ? DiagramRelationshipKind.Association
+                        : DiagramRelationshipKind.Dependency;
+
+                    if (!ShouldInclude(kind, options))
+                    {
+                        continue;
+                    }
+
                     relationships.Add(new DiagramRelationship
                     {
-                        Kind = member.Kind is DiagramMemberKind.Field or DiagramMemberKind.Property or DiagramMemberKind.Event
-                            ? DiagramRelationshipKind.Association
-                            : DiagramRelationshipKind.Dependency,
+                        Kind = kind,
                         FromTypeId = type.Id,
                         ToTypeId = target.Id,
                         Label = member.Name
@@ -56,6 +72,18 @@ internal static class RelationshipBuilder
             .ThenBy(relationship => relationship.FromTypeId, StringComparer.Ordinal)
             .ThenBy(relationship => relationship.ToTypeId, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private static bool ShouldInclude(DiagramRelationshipKind kind, DiagramGenerationOptions options)
+    {
+        return kind switch
+        {
+            DiagramRelationshipKind.Inheritance => options.IncludeInheritance,
+            DiagramRelationshipKind.Realization => options.IncludeRealization,
+            DiagramRelationshipKind.Association => options.IncludeAssociation,
+            DiagramRelationshipKind.Dependency => options.IncludeDependency,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null)
+        };
     }
 
     private sealed class TypeIndex

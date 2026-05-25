@@ -25,6 +25,11 @@ Fill in the WinForms screen:
 - Search file, optional
 - Output path for the generated `.mmd` file
 
+The GUI also provides output options for large projects:
+
+- Display mode: type only, key members, or all members
+- Relationships: inheritance, interface implementation, field/property association, and method dependency can be toggled independently
+
 When the search file is empty, the tool recursively analyzes `.cs`, `.cshtml.cs`, and `.cshtml` files under the search folder. The GUI shows parsing and rendering progress while the Mermaid file is generated.
 
 Razor `.cshtml` files are represented as Razor page nodes. The analyzer includes `@model`, `@inject`, and members declared in `@functions` / `@code` blocks. `.cshtml.cs` code-behind files are parsed as normal C# source.

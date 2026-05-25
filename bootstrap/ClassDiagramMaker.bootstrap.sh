@@ -59,6 +59,11 @@ Fill in the WinForms screen:
 - Search file, optional
 - Output path for the generated `.mmd` file
 
+The GUI also provides output options for large projects:
+
+- Display mode: type only, key members, or all members
+- Relationships: inheritance, interface implementation, field/property association, and method dependency can be toggled independently
+
 When the search file is empty, the tool recursively analyzes `.cs`, `.cshtml.cs`, and `.cshtml` files under the search folder. The GUI shows parsing and rendering progress while the Mermaid file is generated.
 
 Razor `.cshtml` files are represented as Razor page nodes. The analyzer includes `@model`, `@inject`, and members declared in `@functions` / `@code` blocks. `.cshtml.cs` code-behind files are parsed as normal C# source.
@@ -257,7 +262,7 @@ public sealed class ClassDiagramService
             files.Count,
             files.Count));
 
-        var relationships = RelationshipBuilder.Build(types);
+        var relationships = RelationshipBuilder.Build(types, request.Options);
 
         progress.Report(new GenerationProgress(
             "Rendering",
@@ -266,7 +271,8 @@ public sealed class ClassDiagramService
             files.Count,
             files.Count));
 
-        var mermaid = MermaidRenderer.Render(types, relationships);
+        var displayTypes = ApplyDisplayMode(types, request.Options.DisplayMode);
+        var mermaid = MermaidRenderer.Render(displayTypes, relationships);
 
         var outputDirectory = Path.GetDirectoryName(options.OutputPath);
         if (!string.IsNullOrWhiteSpace(outputDirectory))
@@ -463,6 +469,33 @@ public sealed class ClassDiagramService
             .ToList();
     }
 
+    private static IReadOnlyList<DiagramType> ApplyDisplayMode(
+        IReadOnlyList<DiagramType> types,
+        DiagramDisplayMode displayMode)
+    {
+        return displayMode switch
+        {
+            DiagramDisplayMode.AllMembers => types,
+            DiagramDisplayMode.TypeOnly => types
+                .Select(type => type with { Members = Array.Empty<DiagramMember>() })
+                .ToArray(),
+            DiagramDisplayMode.KeyMembers => types
+                .Select(type => type with
+                {
+                    Members = type.Members
+                        .Where(member => member.Kind is
+                            DiagramMemberKind.Field or
+                            DiagramMemberKind.Property or
+                            DiagramMemberKind.Event or
+                            DiagramMemberKind.Indexer or
+                            DiagramMemberKind.EnumValue)
+                        .ToArray()
+                })
+                .ToArray(),
+            _ => throw new ArgumentOutOfRangeException(nameof(displayMode), displayMode, null)
+        };
+    }
+
     private sealed record NormalizedGenerationRequest(
         string ProjectFolder,
         string SearchFolder,
@@ -553,7 +586,27 @@ public sealed record GenerationRequest(
     string ProjectFolder,
     string SearchFolder,
     string? SearchFile,
-    string OutputPath);
+    string OutputPath)
+{
+    public DiagramGenerationOptions Options { get; init; } = DiagramGenerationOptions.Default;
+}
+
+public enum DiagramDisplayMode
+{
+    TypeOnly,
+    KeyMembers,
+    AllMembers
+}
+
+public sealed record DiagramGenerationOptions(
+    DiagramDisplayMode DisplayMode = DiagramDisplayMode.AllMembers,
+    bool IncludeInheritance = true,
+    bool IncludeRealization = true,
+    bool IncludeAssociation = true,
+    bool IncludeDependency = true)
+{
+    public static DiagramGenerationOptions Default { get; } = new();
+}
 
 public sealed record GenerationProgress(
     string Stage,
@@ -879,7 +932,9 @@ namespace ClassDiagramMaker.Analysis;
 
 internal static class RelationshipBuilder
 {
-    public static IReadOnlyList<DiagramRelationship> Build(IReadOnlyList<DiagramType> types)
+    public static IReadOnlyList<DiagramRelationship> Build(
+        IReadOnlyList<DiagramType> types,
+        DiagramGenerationOptions options)
     {
         var index = TypeIndex.Create(types);
         var relationships = new List<DiagramRelationship>();
@@ -894,11 +949,18 @@ internal static class RelationshipBuilder
                     continue;
                 }
 
+                var kind = target.Kind == DiagramTypeKind.Interface && type.Kind != DiagramTypeKind.Interface
+                    ? DiagramRelationshipKind.Realization
+                    : DiagramRelationshipKind.Inheritance;
+
+                if (!ShouldInclude(kind, options))
+                {
+                    continue;
+                }
+
                 relationships.Add(new DiagramRelationship
                 {
-                    Kind = target.Kind == DiagramTypeKind.Interface && type.Kind != DiagramTypeKind.Interface
-                        ? DiagramRelationshipKind.Realization
-                        : DiagramRelationshipKind.Inheritance,
+                    Kind = kind,
                     FromTypeId = type.Id,
                     ToTypeId = target.Id
                 });
@@ -914,11 +976,18 @@ internal static class RelationshipBuilder
                         continue;
                     }
 
+                    var kind = member.Kind is DiagramMemberKind.Field or DiagramMemberKind.Property or DiagramMemberKind.Event
+                        ? DiagramRelationshipKind.Association
+                        : DiagramRelationshipKind.Dependency;
+
+                    if (!ShouldInclude(kind, options))
+                    {
+                        continue;
+                    }
+
                     relationships.Add(new DiagramRelationship
                     {
-                        Kind = member.Kind is DiagramMemberKind.Field or DiagramMemberKind.Property or DiagramMemberKind.Event
-                            ? DiagramRelationshipKind.Association
-                            : DiagramRelationshipKind.Dependency,
+                        Kind = kind,
                         FromTypeId = type.Id,
                         ToTypeId = target.Id,
                         Label = member.Name
@@ -933,6 +1002,18 @@ internal static class RelationshipBuilder
             .ThenBy(relationship => relationship.FromTypeId, StringComparer.Ordinal)
             .ThenBy(relationship => relationship.ToTypeId, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private static bool ShouldInclude(DiagramRelationshipKind kind, DiagramGenerationOptions options)
+    {
+        return kind switch
+        {
+            DiagramRelationshipKind.Inheritance => options.IncludeInheritance,
+            DiagramRelationshipKind.Realization => options.IncludeRealization,
+            DiagramRelationshipKind.Association => options.IncludeAssociation,
+            DiagramRelationshipKind.Dependency => options.IncludeDependency,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null)
+        };
     }
 
     private sealed class TypeIndex
@@ -1584,6 +1665,11 @@ public sealed class MainForm : Form
     private readonly TextBox _searchFolderTextBox = new();
     private readonly TextBox _searchFileTextBox = new();
     private readonly TextBox _outputPathTextBox = new();
+    private readonly ComboBox _displayModeComboBox = new();
+    private readonly CheckBox _includeInheritanceCheckBox = new();
+    private readonly CheckBox _includeRealizationCheckBox = new();
+    private readonly CheckBox _includeAssociationCheckBox = new();
+    private readonly CheckBox _includeDependencyCheckBox = new();
     private readonly Button _generateButton = new();
     private readonly Button _cancelButton = new();
     private readonly ProgressBar _progressBar = new();
@@ -1611,20 +1697,23 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             Padding = new Padding(14)
         };
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         var inputPanel = BuildInputPanel();
+        var optionsPanel = BuildOptionsPanel();
         var progressPanel = BuildProgressPanel();
         var outputSplit = BuildOutputSplit();
 
         root.Controls.Add(inputPanel, 0, 0);
-        root.Controls.Add(progressPanel, 0, 1);
-        root.Controls.Add(outputSplit, 0, 2);
+        root.Controls.Add(optionsPanel, 0, 1);
+        root.Controls.Add(progressPanel, 0, 2);
+        root.Controls.Add(outputSplit, 0, 3);
         Controls.Add(root);
 
         _generateButton.Click += GenerateButton_Click;
@@ -1680,6 +1769,88 @@ public sealed class MainForm : Form
         panel.Controls.Add(buttonPanel, 2, 4);
 
         return panel;
+    }
+
+    private Control BuildOptionsPanel()
+    {
+        var group = new GroupBox
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            Text = "表示オプション",
+            Padding = new Padding(10)
+        };
+
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            ColumnCount = 2,
+            RowCount = 2
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+        var displayLabel = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "表示モード"
+        };
+
+        _displayModeComboBox.Dock = DockStyle.Left;
+        _displayModeComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _displayModeComboBox.Width = 220;
+        _displayModeComboBox.Items.AddRange(new object[]
+        {
+            "型だけ",
+            "主要メンバー",
+            "全メンバー"
+        });
+        _displayModeComboBox.SelectedIndex = 2;
+
+        var relationshipLabel = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "関係"
+        };
+
+        var relationshipPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true
+        };
+
+        ConfigureRelationshipCheckBox(_includeInheritanceCheckBox, "継承", checkedByDefault: true);
+        ConfigureRelationshipCheckBox(_includeRealizationCheckBox, "interface 実装", checkedByDefault: true);
+        ConfigureRelationshipCheckBox(_includeAssociationCheckBox, "フィールド/プロパティ関連", checkedByDefault: true);
+        ConfigureRelationshipCheckBox(_includeDependencyCheckBox, "メソッド依存", checkedByDefault: true);
+
+        relationshipPanel.Controls.Add(_includeInheritanceCheckBox);
+        relationshipPanel.Controls.Add(_includeRealizationCheckBox);
+        relationshipPanel.Controls.Add(_includeAssociationCheckBox);
+        relationshipPanel.Controls.Add(_includeDependencyCheckBox);
+
+        panel.Controls.Add(displayLabel, 0, 0);
+        panel.Controls.Add(_displayModeComboBox, 1, 0);
+        panel.Controls.Add(relationshipLabel, 0, 1);
+        panel.Controls.Add(relationshipPanel, 1, 1);
+
+        group.Controls.Add(panel);
+        return group;
+    }
+
+    private static void ConfigureRelationshipCheckBox(CheckBox checkBox, string text, bool checkedByDefault)
+    {
+        checkBox.Text = text;
+        checkBox.Checked = checkedByDefault;
+        checkBox.AutoSize = true;
+        checkBox.Margin = new Padding(0, 4, 18, 4);
     }
 
     private static void AddPathRow(
@@ -1986,8 +2157,26 @@ public sealed class MainForm : Form
             projectFolder,
             searchFolder,
             string.IsNullOrWhiteSpace(searchFile) ? null : searchFile,
-            outputPath);
+            outputPath)
+        {
+            Options = new DiagramGenerationOptions(
+                DisplayMode: GetSelectedDisplayMode(),
+                IncludeInheritance: _includeInheritanceCheckBox.Checked,
+                IncludeRealization: _includeRealizationCheckBox.Checked,
+                IncludeAssociation: _includeAssociationCheckBox.Checked,
+                IncludeDependency: _includeDependencyCheckBox.Checked)
+        };
         return true;
+    }
+
+    private DiagramDisplayMode GetSelectedDisplayMode()
+    {
+        return _displayModeComboBox.SelectedIndex switch
+        {
+            0 => DiagramDisplayMode.TypeOnly,
+            1 => DiagramDisplayMode.KeyMembers,
+            _ => DiagramDisplayMode.AllMembers
+        };
     }
 
     private void ShowValidationError(string message)

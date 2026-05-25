@@ -299,6 +299,151 @@ public sealed class ClassDiagramServiceTests
         Assert.Contains("+{static} Count: int", result.Mermaid);
     }
 
+    [Fact]
+    public async Task GenerateAsync_WhenDisplayModeIsTypeOnly_HidesMembersButKeepsTypeMetadata()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Repository.cs",
+            """
+            namespace Demo;
+
+            public abstract class Repository<T>
+                where T : class
+            {
+                public string Name { get; }
+                public T Create() => throw new System.NotImplementedException();
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath)
+            {
+                Options = new DiagramGenerationOptions(DisplayMode: DiagramDisplayMode.TypeOnly)
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Contains("class Demo_Repository_T", result.Mermaid);
+        Assert.Contains("<<abstract>>", result.Mermaid);
+        Assert.Contains("where T : class", result.Mermaid);
+        Assert.DoesNotContain("+Name: string", result.Mermaid);
+        Assert.DoesNotContain("+Create(): T", result.Mermaid);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WhenDisplayModeIsKeyMembers_HidesMethodsAndConstructors()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "UserService.cs",
+            """
+            namespace Demo;
+
+            public sealed class UserService
+            {
+                private readonly UserRepository repository;
+
+                public UserService(UserRepository repository)
+                {
+                    this.repository = repository;
+                }
+
+                public User? Current { get; }
+
+                public User? Find(int id) => Current;
+            }
+
+            public sealed class UserRepository
+            {
+            }
+
+            public sealed class User
+            {
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath)
+            {
+                Options = new DiagramGenerationOptions(DisplayMode: DiagramDisplayMode.KeyMembers)
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Contains("-{readonly} repository: UserRepository", result.Mermaid);
+        Assert.Contains("+Current: User?", result.Mermaid);
+        Assert.DoesNotContain("+UserService(repository: UserRepository)", result.Mermaid);
+        Assert.DoesNotContain("+Find(id: int): User?", result.Mermaid);
+    }
+
+    [Theory]
+    [InlineData(true, false, false, false, "Demo_BaseService <|-- Demo_UserService", "<|..", "-->", "..>")]
+    [InlineData(false, true, false, false, "Demo_IUserService <|.. Demo_UserService", "<|--", "-->", "..>")]
+    [InlineData(false, false, true, false, "Demo_UserService --> Demo_UserRepository : repository", "<|--", "<|..", "..>")]
+    [InlineData(false, false, false, true, "Demo_UserService ..> Demo_UserDto : Create", "<|--", "<|..", "-->")]
+    public async Task GenerateAsync_FiltersRelationshipKinds(
+        bool includeInheritance,
+        bool includeRealization,
+        bool includeAssociation,
+        bool includeDependency,
+        string expectedLine,
+        string unexpectedToken1,
+        string unexpectedToken2,
+        string unexpectedToken3)
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "UserService.cs",
+            """
+            namespace Demo;
+
+            public abstract class BaseService
+            {
+            }
+
+            public interface IUserService
+            {
+            }
+
+            public sealed class UserService : BaseService, IUserService
+            {
+                private readonly UserRepository repository;
+
+                public UserDto Create(CreateUserCommand command) => new();
+            }
+
+            public sealed class UserRepository
+            {
+            }
+
+            public sealed class UserDto
+            {
+            }
+
+            public sealed class CreateUserCommand
+            {
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath)
+            {
+                Options = new DiagramGenerationOptions(
+                    IncludeInheritance: includeInheritance,
+                    IncludeRealization: includeRealization,
+                    IncludeAssociation: includeAssociation,
+                    IncludeDependency: includeDependency)
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Contains(expectedLine, result.Mermaid);
+        Assert.DoesNotContain(unexpectedToken1, result.Mermaid);
+        Assert.DoesNotContain(unexpectedToken2, result.Mermaid);
+        Assert.DoesNotContain(unexpectedToken3, result.Mermaid);
+    }
+
     private sealed class TestWorkspace : IDisposable
     {
         private TestWorkspace(string root)

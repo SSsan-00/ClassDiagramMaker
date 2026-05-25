@@ -84,7 +84,7 @@ public sealed class ClassDiagramService
             files.Count,
             files.Count));
 
-        var relationships = RelationshipBuilder.Build(types);
+        var relationships = RelationshipBuilder.Build(types, request.Options);
 
         progress.Report(new GenerationProgress(
             "Rendering",
@@ -93,7 +93,8 @@ public sealed class ClassDiagramService
             files.Count,
             files.Count));
 
-        var mermaid = MermaidRenderer.Render(types, relationships);
+        var displayTypes = ApplyDisplayMode(types, request.Options.DisplayMode);
+        var mermaid = MermaidRenderer.Render(displayTypes, relationships);
 
         var outputDirectory = Path.GetDirectoryName(options.OutputPath);
         if (!string.IsNullOrWhiteSpace(outputDirectory))
@@ -288,6 +289,33 @@ public sealed class ClassDiagramService
             })
             .OrderBy(type => type.FullName, StringComparer.Ordinal)
             .ToList();
+    }
+
+    private static IReadOnlyList<DiagramType> ApplyDisplayMode(
+        IReadOnlyList<DiagramType> types,
+        DiagramDisplayMode displayMode)
+    {
+        return displayMode switch
+        {
+            DiagramDisplayMode.AllMembers => types,
+            DiagramDisplayMode.TypeOnly => types
+                .Select(type => type with { Members = Array.Empty<DiagramMember>() })
+                .ToArray(),
+            DiagramDisplayMode.KeyMembers => types
+                .Select(type => type with
+                {
+                    Members = type.Members
+                        .Where(member => member.Kind is
+                            DiagramMemberKind.Field or
+                            DiagramMemberKind.Property or
+                            DiagramMemberKind.Event or
+                            DiagramMemberKind.Indexer or
+                            DiagramMemberKind.EnumValue)
+                        .ToArray()
+                })
+                .ToArray(),
+            _ => throw new ArgumentOutOfRangeException(nameof(displayMode), displayMode, null)
+        };
     }
 
     private sealed record NormalizedGenerationRequest(

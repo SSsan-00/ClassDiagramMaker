@@ -9,6 +9,11 @@ public sealed class MainForm : Form
     private readonly TextBox _searchFolderTextBox = new();
     private readonly TextBox _searchFileTextBox = new();
     private readonly TextBox _outputPathTextBox = new();
+    private readonly ComboBox _displayModeComboBox = new();
+    private readonly CheckBox _includeInheritanceCheckBox = new();
+    private readonly CheckBox _includeRealizationCheckBox = new();
+    private readonly CheckBox _includeAssociationCheckBox = new();
+    private readonly CheckBox _includeDependencyCheckBox = new();
     private readonly Button _generateButton = new();
     private readonly Button _cancelButton = new();
     private readonly ProgressBar _progressBar = new();
@@ -36,20 +41,23 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             Padding = new Padding(14)
         };
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         var inputPanel = BuildInputPanel();
+        var optionsPanel = BuildOptionsPanel();
         var progressPanel = BuildProgressPanel();
         var outputSplit = BuildOutputSplit();
 
         root.Controls.Add(inputPanel, 0, 0);
-        root.Controls.Add(progressPanel, 0, 1);
-        root.Controls.Add(outputSplit, 0, 2);
+        root.Controls.Add(optionsPanel, 0, 1);
+        root.Controls.Add(progressPanel, 0, 2);
+        root.Controls.Add(outputSplit, 0, 3);
         Controls.Add(root);
 
         _generateButton.Click += GenerateButton_Click;
@@ -105,6 +113,88 @@ public sealed class MainForm : Form
         panel.Controls.Add(buttonPanel, 2, 4);
 
         return panel;
+    }
+
+    private Control BuildOptionsPanel()
+    {
+        var group = new GroupBox
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            Text = "表示オプション",
+            Padding = new Padding(10)
+        };
+
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            ColumnCount = 2,
+            RowCount = 2
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+        var displayLabel = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "表示モード"
+        };
+
+        _displayModeComboBox.Dock = DockStyle.Left;
+        _displayModeComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _displayModeComboBox.Width = 220;
+        _displayModeComboBox.Items.AddRange(new object[]
+        {
+            "型だけ",
+            "主要メンバー",
+            "全メンバー"
+        });
+        _displayModeComboBox.SelectedIndex = 2;
+
+        var relationshipLabel = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "関係"
+        };
+
+        var relationshipPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true
+        };
+
+        ConfigureRelationshipCheckBox(_includeInheritanceCheckBox, "継承", checkedByDefault: true);
+        ConfigureRelationshipCheckBox(_includeRealizationCheckBox, "interface 実装", checkedByDefault: true);
+        ConfigureRelationshipCheckBox(_includeAssociationCheckBox, "フィールド/プロパティ関連", checkedByDefault: true);
+        ConfigureRelationshipCheckBox(_includeDependencyCheckBox, "メソッド依存", checkedByDefault: true);
+
+        relationshipPanel.Controls.Add(_includeInheritanceCheckBox);
+        relationshipPanel.Controls.Add(_includeRealizationCheckBox);
+        relationshipPanel.Controls.Add(_includeAssociationCheckBox);
+        relationshipPanel.Controls.Add(_includeDependencyCheckBox);
+
+        panel.Controls.Add(displayLabel, 0, 0);
+        panel.Controls.Add(_displayModeComboBox, 1, 0);
+        panel.Controls.Add(relationshipLabel, 0, 1);
+        panel.Controls.Add(relationshipPanel, 1, 1);
+
+        group.Controls.Add(panel);
+        return group;
+    }
+
+    private static void ConfigureRelationshipCheckBox(CheckBox checkBox, string text, bool checkedByDefault)
+    {
+        checkBox.Text = text;
+        checkBox.Checked = checkedByDefault;
+        checkBox.AutoSize = true;
+        checkBox.Margin = new Padding(0, 4, 18, 4);
     }
 
     private static void AddPathRow(
@@ -411,8 +501,26 @@ public sealed class MainForm : Form
             projectFolder,
             searchFolder,
             string.IsNullOrWhiteSpace(searchFile) ? null : searchFile,
-            outputPath);
+            outputPath)
+        {
+            Options = new DiagramGenerationOptions(
+                DisplayMode: GetSelectedDisplayMode(),
+                IncludeInheritance: _includeInheritanceCheckBox.Checked,
+                IncludeRealization: _includeRealizationCheckBox.Checked,
+                IncludeAssociation: _includeAssociationCheckBox.Checked,
+                IncludeDependency: _includeDependencyCheckBox.Checked)
+        };
         return true;
+    }
+
+    private DiagramDisplayMode GetSelectedDisplayMode()
+    {
+        return _displayModeComboBox.SelectedIndex switch
+        {
+            0 => DiagramDisplayMode.TypeOnly,
+            1 => DiagramDisplayMode.KeyMembers,
+            _ => DiagramDisplayMode.AllMembers
+        };
     }
 
     private void ShowValidationError(string message)
