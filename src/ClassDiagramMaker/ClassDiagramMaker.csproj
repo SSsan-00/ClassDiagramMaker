@@ -10,6 +10,11 @@
     <AssemblyName>ClassDiagramMaker</AssemblyName>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\ClassDiagramMaker.Core\ClassDiagramMaker.Core.csproj" />
   </ItemGroup>

@@ -29,12 +29,50 @@ When the search file is empty, the tool recursively analyzes `.cs`, `.cshtml.cs`
 
 Razor `.cshtml` files are represented as Razor page nodes. The analyzer includes `@model`, `@inject`, and members declared in `@functions` / `@code` blocks. `.cshtml.cs` code-behind files are parsed as normal C# source.
 
+When a single Razor file is selected, the pair is analyzed together:
+
+- Selecting `Page.cshtml` also analyzes `Page.cshtml.cs` when it exists.
+- Selecting `Page.cshtml.cs` also analyzes `Page.cshtml` when it exists.
+
 ## Tests
 
 Core analysis behavior is covered with xUnit.
 
 ```bash
 dotnet test ClassDiagramMaker.sln
+```
+
+## Release
+
+Build a single Windows executable with PowerShell:
+
+```powershell
+./tools/publish-single-exe.ps1
+```
+
+The default output is:
+
+```text
+artifacts/win-x64-single-file/ClassDiagramMaker.exe
+```
+
+To publish another Windows runtime:
+
+```powershell
+./tools/publish-single-exe.ps1 -Runtime win-arm64
+./tools/publish-single-exe.ps1 -Runtime win-x86
+```
+
+The equivalent `dotnet publish` command is:
+
+```bash
+dotnet publish src/ClassDiagramMaker/ClassDiagramMaker.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishTrimmed=false -p:DebugType=none -p:DebugSymbols=false -p:CopyOutputSymbolsToPublishDirectory=false -o artifacts/win-x64-single-file
+```
+
+The publish profile `win-x64-single-file` is also available:
+
+```bash
+dotnet publish src/ClassDiagramMaker/ClassDiagramMaker.csproj -p:PublishProfile=win-x64-single-file
 ```
 
 ## Output

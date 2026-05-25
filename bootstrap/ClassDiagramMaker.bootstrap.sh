@@ -8,6 +8,7 @@ mkdir -p "$(dirname "$TARGET_DIR/.gitignore")"
 cat > "$TARGET_DIR/.gitignore" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
 bin/
 obj/
+artifacts/
 .vs/
 .idea/
 .vscode/
@@ -62,12 +63,50 @@ When the search file is empty, the tool recursively analyzes `.cs`, `.cshtml.cs`
 
 Razor `.cshtml` files are represented as Razor page nodes. The analyzer includes `@model`, `@inject`, and members declared in `@functions` / `@code` blocks. `.cshtml.cs` code-behind files are parsed as normal C# source.
 
+When a single Razor file is selected, the pair is analyzed together:
+
+- Selecting `Page.cshtml` also analyzes `Page.cshtml.cs` when it exists.
+- Selecting `Page.cshtml.cs` also analyzes `Page.cshtml` when it exists.
+
 ## Tests
 
 Core analysis behavior is covered with xUnit.
 
 ```bash
 dotnet test ClassDiagramMaker.sln
+```
+
+## Release
+
+Build a single Windows executable with PowerShell:
+
+```powershell
+./tools/publish-single-exe.ps1
+```
+
+The default output is:
+
+```text
+artifacts/win-x64-single-file/ClassDiagramMaker.exe
+```
+
+To publish another Windows runtime:
+
+```powershell
+./tools/publish-single-exe.ps1 -Runtime win-arm64
+./tools/publish-single-exe.ps1 -Runtime win-x86
+```
+
+The equivalent `dotnet publish` command is:
+
+```bash
+dotnet publish src/ClassDiagramMaker/ClassDiagramMaker.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishTrimmed=false -p:DebugType=none -p:DebugSymbols=false -p:CopyOutputSymbolsToPublishDirectory=false -o artifacts/win-x64-single-file
+```
+
+The publish profile `win-x64-single-file` is also available:
+
+```bash
+dotnet publish src/ClassDiagramMaker/ClassDiagramMaker.csproj -p:PublishProfile=win-x64-single-file
 ```
 
 ## Output
@@ -116,6 +155,11 @@ cat > "$TARGET_DIR/src/ClassDiagramMaker.Core/ClassDiagramMaker.Core.csproj" <<'
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>ClassDiagramMaker</RootNamespace>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
   <ItemGroup>
@@ -302,13 +346,46 @@ public sealed class ClassDiagramService
     {
         if (!string.IsNullOrWhiteSpace(request.SearchFile))
         {
-            return new List<string> { request.SearchFile };
+            return ExpandSelectedSourceFile(request.SearchFile);
         }
 
         return Directory.EnumerateFiles(request.SearchFolder, "*", SearchOption.AllDirectories)
             .Where(path => IsSupportedSourceFile(path) && !IsIgnoredPath(path))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static List<string> ExpandSelectedSourceFile(string selectedFile)
+    {
+        var files = new List<string>();
+
+        if (IsRazorCodeBehindFile(selectedFile))
+        {
+            var razorPageFile = selectedFile[..^".cs".Length];
+            AddIfExists(files, razorPageFile);
+            AddIfExists(files, selectedFile);
+            return files;
+        }
+
+        AddIfExists(files, selectedFile);
+
+        if (IsRazorPageFile(selectedFile))
+        {
+            AddIfExists(files, $"{selectedFile}.cs");
+        }
+
+        return files
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static void AddIfExists(List<string> files, string path)
+    {
+        if (File.Exists(path) && IsSupportedSourceFile(path) && !IsIgnoredPath(path))
+        {
+            files.Add(path);
+        }
     }
 
     private static bool IsSupportedSourceFile(string path)
@@ -319,6 +396,11 @@ public sealed class ClassDiagramService
     private static bool IsRazorPageFile(string path)
     {
         return string.Equals(Path.GetExtension(path), ".cshtml", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRazorCodeBehindFile(string path)
+    {
+        return path.EndsWith(".cshtml.cs", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsIgnoredPath(string path)
@@ -1439,9 +1521,34 @@ cat > "$TARGET_DIR/src/ClassDiagramMaker/ClassDiagramMaker.csproj" <<'__CLASSDIA
     <AssemblyName>ClassDiagramMaker</AssemblyName>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\ClassDiagramMaker.Core\ClassDiagramMaker.Core.csproj" />
   </ItemGroup>
+</Project>
+
+__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
+
+mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/Properties/PublishProfiles/win-x64-single-file.pubxml")"
+cat > "$TARGET_DIR/src/ClassDiagramMaker/Properties/PublishProfiles/win-x64-single-file.pubxml" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
+<Project>
+  <PropertyGroup>
+    <Configuration>Release</Configuration>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
+    <PublishDir>$(MSBuildProjectDirectory)/../../artifacts/win-x64-single-file/</PublishDir>
+  </PropertyGroup>
 </Project>
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
@@ -1548,7 +1655,7 @@ public sealed class MainForm : Form
             AutoSize = true,
             Dock = DockStyle.Fill,
             ForeColor = SystemColors.GrayText,
-            Text = "検索対象ファイルが空の場合は、検索対象フォルダ配下の .cs / .cshtml ファイルを再帰的に解析します。"
+            Text = "検索対象ファイルが空の場合は再帰解析します。Razor は .cshtml と .cshtml.cs をペアで解析します。"
         };
         panel.Controls.Add(helpLabel, 1, 4);
 
@@ -1951,9 +2058,11 @@ FILES=(
   "src/ClassDiagramMaker.Core/Analysis/SyntaxTypeCollector.cs"
   "src/ClassDiagramMaker.Core/Analysis/TypeReferenceCollector.cs"
   "src/ClassDiagramMaker/ClassDiagramMaker.csproj"
+  "src/ClassDiagramMaker/Properties/PublishProfiles/win-x64-single-file.pubxml"
   "src/ClassDiagramMaker/Program.cs"
   "src/ClassDiagramMaker/MainForm.cs"
   "tools/generate-bootstrap.sh"
+  "tools/publish-single-exe.ps1"
 )
 
 {
@@ -1977,6 +2086,38 @@ FILES=(
 
 chmod +x "$OUTPUT_FILE"
 printf 'Generated %s\n' "$OUTPUT_FILE"
+
+__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
+
+mkdir -p "$(dirname "$TARGET_DIR/tools/publish-single-exe.ps1")"
+cat > "$TARGET_DIR/tools/publish-single-exe.ps1" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
+param(
+    [ValidateSet("win-x64", "win-arm64", "win-x86")]
+    [string]$Runtime = "win-x64",
+
+    [string]$Configuration = "Release"
+)
+
+$ErrorActionPreference = "Stop"
+
+$root = Resolve-Path (Join-Path $PSScriptRoot "..")
+$project = Join-Path $root "src/ClassDiagramMaker/ClassDiagramMaker.csproj"
+$output = Join-Path $root "artifacts/$Runtime-single-file"
+
+dotnet publish $project `
+    -c $Configuration `
+    -r $Runtime `
+    --self-contained true `
+    -p:PublishSingleFile=true `
+    -p:IncludeNativeLibrariesForSelfExtract=true `
+    -p:PublishTrimmed=false `
+    -p:DebugType=none `
+    -p:DebugSymbols=false `
+    -p:CopyOutputSymbolsToPublishDirectory=false `
+    -o $output
+
+Write-Host "Published single-file executable:"
+Write-Host (Join-Path $output "ClassDiagramMaker.exe")
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 

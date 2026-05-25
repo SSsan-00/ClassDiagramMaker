@@ -153,7 +153,7 @@ public sealed class ClassDiagramServiceTests
     }
 
     [Fact]
-    public async Task GenerateAsync_WhenSearchFileIsCshtml_AnalyzesRazorPage()
+    public async Task GenerateAsync_WhenSearchFileIsCshtml_AlsoAnalyzesCodeBehind()
     {
         using var workspace = TestWorkspace.Create();
         var selectedFile = workspace.WriteSource(
@@ -161,6 +161,16 @@ public sealed class ClassDiagramServiceTests
             """
             @page
             @model Demo.Pages.AboutModel
+            """);
+        workspace.WriteSource(
+            "Pages/About.cshtml.cs",
+            """
+            namespace Demo.Pages;
+
+            public sealed class AboutModel
+            {
+                public string Title { get; } = "About";
+            }
             """);
         workspace.WriteSource(
             "Pages/Ignored.cshtml",
@@ -174,9 +184,53 @@ public sealed class ClassDiagramServiceTests
             new Progress<GenerationProgress>(),
             CancellationToken.None);
 
-        Assert.Equal(1, result.TypeCount);
+        Assert.Equal(2, result.TypeCount);
         Assert.Contains("class Pages_About", result.Mermaid);
+        Assert.Contains("class Demo_Pages_AboutModel", result.Mermaid);
         Assert.Contains("+Model: Demo.Pages.AboutModel", result.Mermaid);
+        Assert.Contains("+Title: string", result.Mermaid);
+        Assert.Contains("Pages_About --> Demo_Pages_AboutModel : Model", result.Mermaid);
+        Assert.DoesNotContain("Pages_Ignored", result.Mermaid);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WhenSearchFileIsCshtmlCodeBehind_AlsoAnalyzesRazorPage()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Pages/About.cshtml",
+            """
+            @page
+            @model Demo.Pages.AboutModel
+            """);
+        var selectedFile = workspace.WriteSource(
+            "Pages/About.cshtml.cs",
+            """
+            namespace Demo.Pages;
+
+            public sealed class AboutModel
+            {
+                public string Title { get; } = "About";
+            }
+            """);
+        workspace.WriteSource(
+            "Pages/Ignored.cshtml",
+            """
+            @page
+            @model Demo.Pages.IgnoredModel
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, selectedFile, workspace.OutputPath),
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Equal(2, result.TypeCount);
+        Assert.Contains("class Pages_About", result.Mermaid);
+        Assert.Contains("class Demo_Pages_AboutModel", result.Mermaid);
+        Assert.Contains("+Model: Demo.Pages.AboutModel", result.Mermaid);
+        Assert.Contains("+Title: string", result.Mermaid);
+        Assert.Contains("Pages_About --> Demo_Pages_AboutModel : Model", result.Mermaid);
         Assert.DoesNotContain("Pages_Ignored", result.Mermaid);
     }
 

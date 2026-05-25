@@ -173,13 +173,46 @@ public sealed class ClassDiagramService
     {
         if (!string.IsNullOrWhiteSpace(request.SearchFile))
         {
-            return new List<string> { request.SearchFile };
+            return ExpandSelectedSourceFile(request.SearchFile);
         }
 
         return Directory.EnumerateFiles(request.SearchFolder, "*", SearchOption.AllDirectories)
             .Where(path => IsSupportedSourceFile(path) && !IsIgnoredPath(path))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static List<string> ExpandSelectedSourceFile(string selectedFile)
+    {
+        var files = new List<string>();
+
+        if (IsRazorCodeBehindFile(selectedFile))
+        {
+            var razorPageFile = selectedFile[..^".cs".Length];
+            AddIfExists(files, razorPageFile);
+            AddIfExists(files, selectedFile);
+            return files;
+        }
+
+        AddIfExists(files, selectedFile);
+
+        if (IsRazorPageFile(selectedFile))
+        {
+            AddIfExists(files, $"{selectedFile}.cs");
+        }
+
+        return files
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static void AddIfExists(List<string> files, string path)
+    {
+        if (File.Exists(path) && IsSupportedSourceFile(path) && !IsIgnoredPath(path))
+        {
+            files.Add(path);
+        }
     }
 
     private static bool IsSupportedSourceFile(string path)
@@ -190,6 +223,11 @@ public sealed class ClassDiagramService
     private static bool IsRazorPageFile(string path)
     {
         return string.Equals(Path.GetExtension(path), ".cshtml", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRazorCodeBehindFile(string path)
+    {
+        return path.EndsWith(".cshtml.cs", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsIgnoredPath(string path)

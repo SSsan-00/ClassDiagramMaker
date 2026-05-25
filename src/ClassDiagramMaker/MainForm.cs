@@ -80,7 +80,7 @@ public sealed class MainForm : Form
             AutoSize = true,
             Dock = DockStyle.Fill,
             ForeColor = SystemColors.GrayText,
-            Text = "検索対象ファイルが空の場合は、検索対象フォルダ配下の .cs / .cshtml ファイルを再帰的に解析します。"
+            Text = "検索対象ファイルが空の場合は再帰解析します。Razor は .cshtml と .cshtml.cs をペアで解析します。"
         };
         panel.Controls.Add(helpLabel, 1, 4);
 

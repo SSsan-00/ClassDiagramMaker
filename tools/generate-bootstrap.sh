@@ -19,9 +19,11 @@ FILES=(
   "src/ClassDiagramMaker.Core/Analysis/SyntaxTypeCollector.cs"
   "src/ClassDiagramMaker.Core/Analysis/TypeReferenceCollector.cs"
   "src/ClassDiagramMaker/ClassDiagramMaker.csproj"
+  "src/ClassDiagramMaker/Properties/PublishProfiles/win-x64-single-file.pubxml"
   "src/ClassDiagramMaker/Program.cs"
   "src/ClassDiagramMaker/MainForm.cs"
   "tools/generate-bootstrap.sh"
+  "tools/publish-single-exe.ps1"
 )
 
 {
