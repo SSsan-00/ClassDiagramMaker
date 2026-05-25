@@ -8,20 +8,18 @@ MARKER="__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__"
 FILES=(
   ".gitignore"
   "global.json"
-  "ClassDiagramMaker.sln"
   "README.md"
+  "src/ClassDiagramMaker.Core/ClassDiagramMaker.Core.csproj"
+  "src/ClassDiagramMaker.Core/Analysis/ClassDiagramService.cs"
+  "src/ClassDiagramMaker.Core/Analysis/DiagramModel.cs"
+  "src/ClassDiagramMaker.Core/Analysis/GenerationContracts.cs"
+  "src/ClassDiagramMaker.Core/Analysis/MermaidRenderer.cs"
+  "src/ClassDiagramMaker.Core/Analysis/RelationshipBuilder.cs"
+  "src/ClassDiagramMaker.Core/Analysis/SyntaxTypeCollector.cs"
+  "src/ClassDiagramMaker.Core/Analysis/TypeReferenceCollector.cs"
   "src/ClassDiagramMaker/ClassDiagramMaker.csproj"
   "src/ClassDiagramMaker/Program.cs"
-  "src/ClassDiagramMaker/Analysis/ClassDiagramService.cs"
-  "src/ClassDiagramMaker/Analysis/DiagramModel.cs"
-  "src/ClassDiagramMaker/Analysis/GenerationContracts.cs"
-  "src/ClassDiagramMaker/Analysis/MermaidRenderer.cs"
-  "src/ClassDiagramMaker/Analysis/RelationshipBuilder.cs"
-  "src/ClassDiagramMaker/Analysis/SyntaxTypeCollector.cs"
-  "src/ClassDiagramMaker/Analysis/TypeReferenceCollector.cs"
-  "src/ClassDiagramMaker/wwwroot/app.js"
-  "src/ClassDiagramMaker/wwwroot/index.html"
-  "src/ClassDiagramMaker/wwwroot/styles.css"
+  "src/ClassDiagramMaker/MainForm.cs"
   "tools/generate-bootstrap.sh"
 )
 
@@ -41,7 +39,7 @@ FILES=(
 
   printf '%s\n' 'chmod +x "$TARGET_DIR/tools/generate-bootstrap.sh"'
   printf '%s\n' 'echo "Created ClassDiagramMaker source at $TARGET_DIR"'
-  printf '%s\n' 'echo "Run: cd $TARGET_DIR && dotnet run --project src/ClassDiagramMaker/ClassDiagramMaker.csproj"'
+  printf '%s\n' 'echo "Run on Windows: cd $TARGET_DIR && dotnet run --project src/ClassDiagramMaker/ClassDiagramMaker.csproj"'
 } > "$OUTPUT_FILE"
 
 chmod +x "$OUTPUT_FILE"

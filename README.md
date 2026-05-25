@@ -2,20 +2,23 @@
 
 C# source analyzer for generating Mermaid class diagrams from selected files and directories.
 
+The GUI is a Windows-first WinForms application.
+
 ## Requirements
 
 - .NET SDK 9.0
+- Windows for running the WinForms GUI
 
 The repository includes `global.json` to use the .NET 9 SDK even when newer SDKs are installed.
 
 ## Run
 
 ```bash
-dotnet restore
+dotnet restore src/ClassDiagramMaker/ClassDiagramMaker.csproj
 dotnet run --project src/ClassDiagramMaker/ClassDiagramMaker.csproj
 ```
 
-Open the URL printed by `dotnet run`, then fill in:
+Fill in the WinForms screen:
 
 - Target project folder
 - Search folder
@@ -23,6 +26,14 @@ Open the URL printed by `dotnet run`, then fill in:
 - Output path for the generated `.mmd` file
 
 When the search file is empty, the tool recursively analyzes `.cs` files under the search folder. The GUI shows parsing and rendering progress while the Mermaid file is generated.
+
+## Tests
+
+Core analysis behavior is covered with xUnit.
+
+```bash
+dotnet test ClassDiagramMaker.sln
+```
 
 ## Output
 
@@ -43,7 +54,7 @@ For users who cannot download the repository, this project provides a generated 
 ./bootstrap/ClassDiagramMaker.bootstrap.sh ./ClassDiagramMaker
 ```
 
-The script recreates the source tree locally. Regenerate it after source changes with:
+The script recreates the app and core source tree locally. It intentionally does not include xUnit test code. Regenerate it after source changes with:
 
 ```bash
 ./tools/generate-bootstrap.sh

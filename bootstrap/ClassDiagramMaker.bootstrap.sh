@@ -29,70 +29,29 @@ cat > "$TARGET_DIR/global.json" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
-mkdir -p "$(dirname "$TARGET_DIR/ClassDiagramMaker.sln")"
-cat > "$TARGET_DIR/ClassDiagramMaker.sln" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
-﻿
-Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.0.31903.59
-MinimumVisualStudioVersion = 10.0.40219.1
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ClassDiagramMaker", "src\ClassDiagramMaker\ClassDiagramMaker.csproj", "{87BBB3F1-1552-4D14-A60B-D34B3133984F}"
-EndProject
-Global
-	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Debug|Any CPU = Debug|Any CPU
-		Debug|x64 = Debug|x64
-		Debug|x86 = Debug|x86
-		Release|Any CPU = Release|Any CPU
-		Release|x64 = Release|x64
-		Release|x86 = Release|x86
-	EndGlobalSection
-	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{87BBB3F1-1552-4D14-A60B-D34B3133984F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{87BBB3F1-1552-4D14-A60B-D34B3133984F}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{87BBB3F1-1552-4D14-A60B-D34B3133984F}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{87BBB3F1-1552-4D14-A60B-D34B3133984F}.Debug|x64.Build.0 = Debug|Any CPU
-		{87BBB3F1-1552-4D14-A60B-D34B3133984F}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{87BBB3F1-1552-4D14-A60B-D34B3133984F}.Debug|x86.Build.0 = Debug|Any CPU
-		{87BBB3F1-1552-4D14-A60B-D34B3133984F}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{87BBB3F1-1552-4D14-A60B-D34B3133984F}.Release|Any CPU.Build.0 = Release|Any CPU
-		{87BBB3F1-1552-4D14-A60B-D34B3133984F}.Release|x64.ActiveCfg = Release|Any CPU
-		{87BBB3F1-1552-4D14-A60B-D34B3133984F}.Release|x64.Build.0 = Release|Any CPU
-		{87BBB3F1-1552-4D14-A60B-D34B3133984F}.Release|x86.ActiveCfg = Release|Any CPU
-		{87BBB3F1-1552-4D14-A60B-D34B3133984F}.Release|x86.Build.0 = Release|Any CPU
-	EndGlobalSection
-	GlobalSection(SolutionProperties) = preSolution
-		HideSolutionNode = FALSE
-	EndGlobalSection
-	GlobalSection(NestedProjects) = preSolution
-		{87BBB3F1-1552-4D14-A60B-D34B3133984F} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
-	EndGlobalSection
-EndGlobal
-
-__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
-
 mkdir -p "$(dirname "$TARGET_DIR/README.md")"
 cat > "$TARGET_DIR/README.md" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
 # ClassDiagramMaker
 
 C# source analyzer for generating Mermaid class diagrams from selected files and directories.
 
+The GUI is a Windows-first WinForms application.
+
 ## Requirements
 
 - .NET SDK 9.0
+- Windows for running the WinForms GUI
 
 The repository includes `global.json` to use the .NET 9 SDK even when newer SDKs are installed.
 
 ## Run
 
 ```bash
-dotnet restore
+dotnet restore src/ClassDiagramMaker/ClassDiagramMaker.csproj
 dotnet run --project src/ClassDiagramMaker/ClassDiagramMaker.csproj
 ```
 
-Open the URL printed by `dotnet run`, then fill in:
+Fill in the WinForms screen:
 
 - Target project folder
 - Search folder
@@ -100,6 +59,14 @@ Open the URL printed by `dotnet run`, then fill in:
 - Output path for the generated `.mmd` file
 
 When the search file is empty, the tool recursively analyzes `.cs` files under the search folder. The GUI shows parsing and rendering progress while the Mermaid file is generated.
+
+## Tests
+
+Core analysis behavior is covered with xUnit.
+
+```bash
+dotnet test ClassDiagramMaker.sln
+```
 
 ## Output
 
@@ -120,7 +87,7 @@ For users who cannot download the repository, this project provides a generated 
 ./bootstrap/ClassDiagramMaker.bootstrap.sh ./ClassDiagramMaker
 ```
 
-The script recreates the source tree locally. Regenerate it after source changes with:
+The script recreates the app and core source tree locally. It intentionally does not include xUnit test code. Regenerate it after source changes with:
 
 ```bash
 ./tools/generate-bootstrap.sh
@@ -128,15 +95,14 @@ The script recreates the source tree locally. Regenerate it after source changes
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
-mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/ClassDiagramMaker.csproj")"
-cat > "$TARGET_DIR/src/ClassDiagramMaker/ClassDiagramMaker.csproj" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
-<Project Sdk="Microsoft.NET.Sdk.Web">
+mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker.Core/ClassDiagramMaker.Core.csproj")"
+cat > "$TARGET_DIR/src/ClassDiagramMaker.Core/ClassDiagramMaker.Core.csproj" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>ClassDiagramMaker</RootNamespace>
-    <AssemblyName>ClassDiagramMaker</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
@@ -146,140 +112,8 @@ cat > "$TARGET_DIR/src/ClassDiagramMaker/ClassDiagramMaker.csproj" <<'__CLASSDIA
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
-mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/Program.cs")"
-cat > "$TARGET_DIR/src/ClassDiagramMaker/Program.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
-using System.Text.Json.Serialization;
-using ClassDiagramMaker.Analysis;
-
-var builder = WebApplication.CreateBuilder(new WebApplicationOptions
-{
-    Args = args,
-    ContentRootPath = ResolveContentRoot(),
-    WebRootPath = "wwwroot"
-});
-
-builder.Services.ConfigureHttpJsonOptions(options =>
-{
-    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
-});
-builder.Services.AddSingleton<ClassDiagramService>();
-builder.Services.AddSingleton<DiagramJobStore>();
-
-var app = builder.Build();
-
-app.UseDefaultFiles();
-app.UseStaticFiles();
-
-app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
-
-app.MapPost("/api/generate", (GenerationRequest request, DiagramJobStore jobs, ClassDiagramService service) =>
-{
-    var job = jobs.Create(request);
-
-    _ = Task.Run(async () =>
-    {
-        try
-        {
-            jobs.Update(job.Id, snapshot => snapshot with
-            {
-                Status = JobStatus.Running,
-                Message = "Starting analysis..."
-            });
-
-            var progress = new Progress<GenerationProgress>(update =>
-            {
-                jobs.Update(job.Id, snapshot => snapshot with
-                {
-                    Status = JobStatus.Running,
-                    Percent = update.Percent,
-                    Stage = update.Stage,
-                    Message = update.Message,
-                    ProcessedFiles = update.ProcessedFiles,
-                    TotalFiles = update.TotalFiles,
-                    Log = snapshot.Log.Append(update.Message).TakeLast(80).ToArray()
-                });
-            });
-
-            var result = await service.GenerateAsync(request, progress, CancellationToken.None);
-
-            jobs.Update(job.Id, snapshot => snapshot with
-            {
-                Status = JobStatus.Completed,
-                Percent = 100,
-                Stage = "Completed",
-                Message = $"Generated {result.TypeCount} types and {result.RelationshipCount} relationships.",
-                OutputPath = result.OutputPath,
-                Mermaid = result.Mermaid,
-                FinishedAt = DateTimeOffset.UtcNow,
-                Log = snapshot.Log
-                    .Append($"Wrote Mermaid output: {result.OutputPath}")
-                    .Append($"Types: {result.TypeCount}, relationships: {result.RelationshipCount}")
-                    .TakeLast(80)
-                    .ToArray()
-            });
-        }
-        catch (Exception ex)
-        {
-            jobs.Update(job.Id, snapshot => snapshot with
-            {
-                Status = JobStatus.Failed,
-                Stage = "Failed",
-                Message = ex.Message,
-                Error = ex.ToString(),
-                FinishedAt = DateTimeOffset.UtcNow,
-                Log = snapshot.Log.Append(ex.Message).TakeLast(80).ToArray()
-            });
-        }
-    });
-
-    return Results.Accepted($"/api/jobs/{job.Id}", new { job.Id });
-});
-
-app.MapGet("/api/jobs/{id:guid}", (Guid id, DiagramJobStore jobs) =>
-{
-    var snapshot = jobs.Get(id);
-    return snapshot is null ? Results.NotFound() : Results.Ok(snapshot);
-});
-
-app.MapGet("/api/jobs/{id:guid}/output", (Guid id, DiagramJobStore jobs) =>
-{
-    var snapshot = jobs.Get(id);
-    if (snapshot is null)
-    {
-        return Results.NotFound();
-    }
-
-    if (snapshot.Status != JobStatus.Completed || string.IsNullOrWhiteSpace(snapshot.Mermaid))
-    {
-        return Results.BadRequest(new { error = "Output is not ready." });
-    }
-
-    return Results.Text(snapshot.Mermaid, "text/plain");
-});
-
-app.Run();
-
-static string ResolveContentRoot()
-{
-    var publishedRoot = AppContext.BaseDirectory;
-    if (Directory.Exists(Path.Combine(publishedRoot, "wwwroot")))
-    {
-        return publishedRoot;
-    }
-
-    var sourceRoot = Path.GetFullPath(Path.Combine(publishedRoot, "..", "..", ".."));
-    if (Directory.Exists(Path.Combine(sourceRoot, "wwwroot")))
-    {
-        return sourceRoot;
-    }
-
-    return Directory.GetCurrentDirectory();
-}
-
-__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
-
-mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/Analysis/ClassDiagramService.cs")"
-cat > "$TARGET_DIR/src/ClassDiagramMaker/Analysis/ClassDiagramService.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
+mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/ClassDiagramService.cs")"
+cat > "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/ClassDiagramService.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -520,8 +354,8 @@ public sealed class ClassDiagramService
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
-mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/Analysis/DiagramModel.cs")"
-cat > "$TARGET_DIR/src/ClassDiagramMaker/Analysis/DiagramModel.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
+mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/DiagramModel.cs")"
+cat > "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/DiagramModel.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
 namespace ClassDiagramMaker.Analysis;
 
 public enum DiagramTypeKind
@@ -589,8 +423,8 @@ public sealed record DiagramRelationship
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
-mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/Analysis/GenerationContracts.cs")"
-cat > "$TARGET_DIR/src/ClassDiagramMaker/Analysis/GenerationContracts.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
+mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/GenerationContracts.cs")"
+cat > "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/GenerationContracts.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
 namespace ClassDiagramMaker.Analysis;
 
 public sealed record GenerationRequest(
@@ -612,79 +446,10 @@ public sealed record GenerationResult(
     int TypeCount,
     int RelationshipCount);
 
-public enum JobStatus
-{
-    Queued,
-    Running,
-    Completed,
-    Failed
-}
-
-public sealed record DiagramJobSnapshot
-{
-    public required Guid Id { get; init; }
-    public required JobStatus Status { get; init; }
-    public required GenerationRequest Request { get; init; }
-    public required DateTimeOffset CreatedAt { get; init; }
-    public DateTimeOffset? FinishedAt { get; init; }
-    public string Stage { get; init; } = "Queued";
-    public string Message { get; init; } = "Waiting to start...";
-    public int Percent { get; init; }
-    public int ProcessedFiles { get; init; }
-    public int TotalFiles { get; init; }
-    public string? OutputPath { get; init; }
-    public string? Mermaid { get; init; }
-    public string? Error { get; init; }
-    public IReadOnlyList<string> Log { get; init; } = Array.Empty<string>();
-}
-
-public sealed class DiagramJobStore
-{
-    private readonly Dictionary<Guid, DiagramJobSnapshot> _jobs = new();
-    private readonly object _gate = new();
-
-    public DiagramJobSnapshot Create(GenerationRequest request)
-    {
-        var snapshot = new DiagramJobSnapshot
-        {
-            Id = Guid.NewGuid(),
-            Status = JobStatus.Queued,
-            Request = request,
-            CreatedAt = DateTimeOffset.UtcNow
-        };
-
-        lock (_gate)
-        {
-            _jobs[snapshot.Id] = snapshot;
-        }
-
-        return snapshot;
-    }
-
-    public DiagramJobSnapshot? Get(Guid id)
-    {
-        lock (_gate)
-        {
-            return _jobs.TryGetValue(id, out var snapshot) ? snapshot : null;
-        }
-    }
-
-    public void Update(Guid id, Func<DiagramJobSnapshot, DiagramJobSnapshot> update)
-    {
-        lock (_gate)
-        {
-            if (_jobs.TryGetValue(id, out var snapshot))
-            {
-                _jobs[id] = update(snapshot);
-            }
-        }
-    }
-}
-
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
-mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/Analysis/MermaidRenderer.cs")"
-cat > "$TARGET_DIR/src/ClassDiagramMaker/Analysis/MermaidRenderer.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
+mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/MermaidRenderer.cs")"
+cat > "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/MermaidRenderer.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -791,8 +556,8 @@ internal static class MermaidNames
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
-mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/Analysis/RelationshipBuilder.cs")"
-cat > "$TARGET_DIR/src/ClassDiagramMaker/Analysis/RelationshipBuilder.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
+mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/RelationshipBuilder.cs")"
+cat > "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/RelationshipBuilder.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
 namespace ClassDiagramMaker.Analysis;
 
 internal static class RelationshipBuilder
@@ -933,8 +698,8 @@ internal static class RelationshipBuilder
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
-mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/Analysis/SyntaxTypeCollector.cs")"
-cat > "$TARGET_DIR/src/ClassDiagramMaker/Analysis/SyntaxTypeCollector.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
+mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/SyntaxTypeCollector.cs")"
+cat > "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/SyntaxTypeCollector.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -1309,8 +1074,8 @@ internal static class SyntaxTypeCollector
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
-mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/Analysis/TypeReferenceCollector.cs")"
-cat > "$TARGET_DIR/src/ClassDiagramMaker/Analysis/TypeReferenceCollector.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
+mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/TypeReferenceCollector.cs")"
+cat > "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/TypeReferenceCollector.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace ClassDiagramMaker.Analysis;
@@ -1382,509 +1147,505 @@ internal static class TypeReferenceCollector
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
-mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/wwwroot/app.js")"
-cat > "$TARGET_DIR/src/ClassDiagramMaker/wwwroot/app.js" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
-const form = document.querySelector("#generateForm");
-const generateButton = document.querySelector("#generateButton");
-const resetButton = document.querySelector("#resetButton");
-const statusPill = document.querySelector("#statusPill");
-const stageLabel = document.querySelector("#stageLabel");
-const messageLabel = document.querySelector("#messageLabel");
-const percentLabel = document.querySelector("#percentLabel");
-const progressBar = document.querySelector("#progressBar");
-const fileMetric = document.querySelector("#fileMetric");
-const outputMetric = document.querySelector("#outputMetric");
-const logOutput = document.querySelector("#logOutput");
-const mermaidOutput = document.querySelector("#mermaidOutput");
+mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/ClassDiagramMaker.csproj")"
+cat > "$TARGET_DIR/src/ClassDiagramMaker/ClassDiagramMaker.csproj" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ClassDiagramMaker</RootNamespace>
+    <AssemblyName>ClassDiagramMaker</AssemblyName>
+  </PropertyGroup>
 
-let pollHandle = null;
+  <ItemGroup>
+    <ProjectReference Include="..\ClassDiagramMaker.Core\ClassDiagramMaker.Core.csproj" />
+  </ItemGroup>
+</Project>
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  stopPolling();
+__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
-  const data = new FormData(form);
-  const payload = {
-    projectFolder: data.get("projectFolder")?.trim() ?? "",
-    searchFolder: data.get("searchFolder")?.trim() ?? "",
-    searchFile: data.get("searchFile")?.trim() || null,
-    outputPath: data.get("outputPath")?.trim() ?? ""
-  };
+mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/Program.cs")"
+cat > "$TARGET_DIR/src/ClassDiagramMaker/Program.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
+using ClassDiagramMaker.Analysis;
 
-  setBusy(true);
-  setSnapshot({
-    status: "Queued",
-    stage: "Queued",
-    message: "ジョブを作成しています...",
-    percent: 0,
-    processedFiles: 0,
-    totalFiles: 0,
-    log: []
-  });
-  mermaidOutput.value = "";
+namespace ClassDiagramMaker;
 
-  try {
-    const response = await fetch("/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
-      throw new Error(await response.text());
+internal static class Program
+{
+    [STAThread]
+    private static void Main()
+    {
+        ApplicationConfiguration.Initialize();
+        Application.Run(new MainForm(new ClassDiagramService()));
     }
-
-    const result = await response.json();
-    pollJob(result.id);
-  } catch (error) {
-    setBusy(false);
-    setFailed(error.message);
-  }
-});
-
-resetButton.addEventListener("click", () => {
-  stopPolling();
-  form.reset();
-  setBusy(false);
-  setSnapshot({
-    status: "Queued",
-    stage: "待機中",
-    message: "入力して生成を開始してください。",
-    percent: 0,
-    processedFiles: 0,
-    totalFiles: 0,
-    log: []
-  });
-  mermaidOutput.value = "";
-});
-
-async function pollJob(id) {
-  const update = async () => {
-    try {
-      const response = await fetch(`/api/jobs/${id}`);
-      if (!response.ok) {
-        throw new Error(await response.text());
-      }
-
-      const snapshot = await response.json();
-      setSnapshot(snapshot);
-
-      if (snapshot.status === "Completed") {
-        stopPolling();
-        setBusy(false);
-        mermaidOutput.value = snapshot.mermaid ?? "";
-      } else if (snapshot.status === "Failed") {
-        stopPolling();
-        setBusy(false);
-      }
-    } catch (error) {
-      stopPolling();
-      setBusy(false);
-      setFailed(error.message);
-    }
-  };
-
-  await update();
-  pollHandle = window.setInterval(update, 600);
-}
-
-function stopPolling() {
-  if (pollHandle !== null) {
-    window.clearInterval(pollHandle);
-    pollHandle = null;
-  }
-}
-
-function setBusy(isBusy) {
-  generateButton.disabled = isBusy;
-  generateButton.textContent = isBusy ? "処理中" : "生成";
-}
-
-function setFailed(message) {
-  setSnapshot({
-    status: "Failed",
-    stage: "Failed",
-    message,
-    percent: 0,
-    processedFiles: 0,
-    totalFiles: 0,
-    log: [message]
-  });
-}
-
-function setSnapshot(snapshot) {
-  const percent = clamp(Number(snapshot.percent ?? 0), 0, 100);
-  const status = snapshot.status ?? "Queued";
-
-  stageLabel.textContent = snapshot.stage ?? status;
-  messageLabel.textContent = snapshot.message ?? "";
-  percentLabel.textContent = `${percent}%`;
-  progressBar.style.width = `${percent}%`;
-  fileMetric.textContent = `${snapshot.processedFiles ?? 0} / ${snapshot.totalFiles ?? 0} files`;
-  outputMetric.textContent = snapshot.outputPath ? `出力: ${snapshot.outputPath}` : "出力なし";
-  logOutput.textContent = Array.isArray(snapshot.log) ? snapshot.log.join("\n") : "";
-
-  statusPill.className = "status-pill";
-  if (status === "Running") {
-    statusPill.classList.add("running");
-    statusPill.textContent = "処理中";
-  } else if (status === "Completed") {
-    statusPill.classList.add("running");
-    statusPill.textContent = "完了";
-  } else if (status === "Failed") {
-    statusPill.classList.add("failed");
-    statusPill.textContent = "失敗";
-  } else {
-    statusPill.textContent = "待機中";
-  }
-}
-
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
 }
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
-mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/wwwroot/index.html")"
-cat > "$TARGET_DIR/src/ClassDiagramMaker/wwwroot/index.html" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
-<!doctype html>
-<html lang="ja">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ClassDiagramMaker</title>
-  <link rel="stylesheet" href="/styles.css">
-</head>
-<body>
-  <main class="app-shell">
-    <header class="top-bar">
-      <div>
-        <h1>ClassDiagramMaker</h1>
-        <p>C# AST 解析から Mermaid クラス図を生成します。</p>
-      </div>
-      <div class="status-pill" id="statusPill">待機中</div>
-    </header>
+mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/MainForm.cs")"
+cat > "$TARGET_DIR/src/ClassDiagramMaker/MainForm.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
+using ClassDiagramMaker.Analysis;
 
-    <section class="workspace">
-      <form id="generateForm" class="control-panel">
-        <div class="field">
-          <label for="projectFolder">対象プロジェクトフォルダ</label>
-          <input id="projectFolder" name="projectFolder" type="text" autocomplete="off" placeholder="/path/to/project" required>
-        </div>
+namespace ClassDiagramMaker;
 
-        <div class="field">
-          <label for="searchFolder">検索対象フォルダ</label>
-          <input id="searchFolder" name="searchFolder" type="text" autocomplete="off" placeholder="/path/to/project/src">
-        </div>
+public sealed class MainForm : Form
+{
+    private readonly ClassDiagramService _service;
+    private readonly TextBox _projectFolderTextBox = new();
+    private readonly TextBox _searchFolderTextBox = new();
+    private readonly TextBox _searchFileTextBox = new();
+    private readonly TextBox _outputPathTextBox = new();
+    private readonly Button _generateButton = new();
+    private readonly Button _cancelButton = new();
+    private readonly ProgressBar _progressBar = new();
+    private readonly Label _stageLabel = new();
+    private readonly Label _messageLabel = new();
+    private readonly Label _fileCountLabel = new();
+    private readonly Label _outputLabel = new();
+    private readonly TextBox _logTextBox = new();
+    private readonly TextBox _mermaidTextBox = new();
+    private CancellationTokenSource? _generationCancellation;
 
-        <div class="field">
-          <label for="searchFile">検索対象ファイル</label>
-          <input id="searchFile" name="searchFile" type="text" autocomplete="off" placeholder="/path/to/project/src/Foo.cs">
-          <span class="hint">空の場合は検索対象フォルダ配下の .cs ファイルを再帰的に解析します。</span>
-        </div>
+    public MainForm(ClassDiagramService service)
+    {
+        _service = service;
+        InitializeComponent();
+    }
 
-        <div class="field">
-          <label for="outputPath">出力先</label>
-          <input id="outputPath" name="outputPath" type="text" autocomplete="off" placeholder="/path/to/output/class-diagram.mmd" required>
-        </div>
+    private void InitializeComponent()
+    {
+        Text = "ClassDiagramMaker";
+        MinimumSize = new Size(980, 720);
+        StartPosition = FormStartPosition.CenterScreen;
 
-        <div class="actions">
-          <button id="generateButton" type="submit">生成</button>
-          <button id="resetButton" type="button" class="secondary">クリア</button>
-        </div>
-      </form>
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            Padding = new Padding(14)
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-      <section class="progress-panel" aria-live="polite">
-        <div class="progress-head">
-          <div>
-            <h2 id="stageLabel">待機中</h2>
-            <p id="messageLabel">入力して生成を開始してください。</p>
-          </div>
-          <strong id="percentLabel">0%</strong>
-        </div>
-        <div class="progress-track">
-          <div id="progressBar" class="progress-bar"></div>
-        </div>
-        <div class="metrics">
-          <span id="fileMetric">0 / 0 files</span>
-          <span id="outputMetric">出力なし</span>
-        </div>
-        <pre id="logOutput" class="log-output"></pre>
-        <textarea id="mermaidOutput" class="mermaid-output" spellcheck="false" readonly placeholder="生成された Mermaid がここに表示されます。"></textarea>
-      </section>
-    </section>
-  </main>
+        var inputPanel = BuildInputPanel();
+        var progressPanel = BuildProgressPanel();
+        var outputSplit = BuildOutputSplit();
 
-  <script src="/app.js"></script>
-</body>
-</html>
+        root.Controls.Add(inputPanel, 0, 0);
+        root.Controls.Add(progressPanel, 0, 1);
+        root.Controls.Add(outputSplit, 0, 2);
+        Controls.Add(root);
 
-__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
+        _generateButton.Click += GenerateButton_Click;
+        _cancelButton.Click += CancelButton_Click;
+    }
 
-mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker/wwwroot/styles.css")"
-cat > "$TARGET_DIR/src/ClassDiagramMaker/wwwroot/styles.css" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
-:root {
-  color-scheme: light;
-  --bg: #f5f7f9;
-  --surface: #ffffff;
-  --surface-strong: #eef2f6;
-  --text: #16202a;
-  --muted: #667381;
-  --line: #d8e0e7;
-  --accent: #287c6b;
-  --accent-strong: #1d6658;
-  --danger: #b63d3d;
-  --shadow: 0 10px 30px rgba(19, 31, 44, 0.08);
-}
+    private Control BuildInputPanel()
+    {
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 3,
+            RowCount = 5,
+            Padding = new Padding(0, 0, 0, 10)
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 96));
 
-* {
-  box-sizing: border-box;
-}
+        AddPathRow(panel, 0, "対象プロジェクト", _projectFolderTextBox, "参照...", BrowseProjectFolder);
+        AddPathRow(panel, 1, "検索対象フォルダ", _searchFolderTextBox, "参照...", BrowseSearchFolder);
+        AddPathRow(panel, 2, "検索対象ファイル", _searchFileTextBox, "参照...", BrowseSearchFile);
+        AddPathRow(panel, 3, "出力先", _outputPathTextBox, "参照...", BrowseOutputPath);
 
-body {
-  margin: 0;
-  min-height: 100vh;
-  background: var(--bg);
-  color: var(--text);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
+        var helpLabel = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            ForeColor = SystemColors.GrayText,
+            Text = "検索対象ファイルが空の場合は、検索対象フォルダ配下の .cs ファイルを再帰的に解析します。"
+        };
+        panel.Controls.Add(helpLabel, 1, 4);
 
-button,
-input,
-textarea {
-  font: inherit;
-}
+        var buttonPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            AutoSize = true
+        };
 
-.app-shell {
-  width: min(1180px, calc(100vw - 32px));
-  margin: 0 auto;
-  padding: 28px 0;
-}
+        _generateButton.Text = "生成";
+        _generateButton.AutoSize = true;
+        _generateButton.MinimumSize = new Size(96, 34);
 
-.top-bar {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 20px;
-}
+        _cancelButton.Text = "キャンセル";
+        _cancelButton.AutoSize = true;
+        _cancelButton.MinimumSize = new Size(96, 34);
+        _cancelButton.Enabled = false;
 
-.top-bar h1 {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.15;
-}
+        buttonPanel.Controls.Add(_generateButton);
+        buttonPanel.Controls.Add(_cancelButton);
+        panel.Controls.Add(buttonPanel, 2, 4);
 
-.top-bar p {
-  margin: 6px 0 0;
-  color: var(--muted);
-}
+        return panel;
+    }
 
-.status-pill {
-  min-width: 96px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--muted);
-  text-align: center;
-  font-size: 14px;
-}
+    private static void AddPathRow(
+        TableLayoutPanel panel,
+        int row,
+        string label,
+        TextBox textBox,
+        string buttonText,
+        EventHandler browseHandler)
+    {
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-.status-pill.running {
-  border-color: rgba(40, 124, 107, 0.45);
-  color: var(--accent-strong);
-}
+        var labelControl = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = label
+        };
 
-.status-pill.failed {
-  border-color: rgba(182, 61, 61, 0.45);
-  color: var(--danger);
-}
+        textBox.Dock = DockStyle.Fill;
+        textBox.Margin = new Padding(0, 4, 8, 4);
 
-.workspace {
-  display: grid;
-  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
-  gap: 20px;
-  align-items: start;
-}
+        var button = new Button
+        {
+            Text = buttonText,
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 4, 0, 4)
+        };
+        button.Click += browseHandler;
 
-.control-panel,
-.progress-panel {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
-}
+        panel.Controls.Add(labelControl, 0, row);
+        panel.Controls.Add(textBox, 1, row);
+        panel.Controls.Add(button, 2, row);
+    }
 
-.control-panel {
-  display: grid;
-  gap: 18px;
-  padding: 20px;
-}
+    private Control BuildProgressPanel()
+    {
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 2,
+            RowCount = 4,
+            Padding = new Padding(0, 0, 0, 10)
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
 
-.field {
-  display: grid;
-  gap: 7px;
-}
+        _stageLabel.Text = "待機中";
+        _stageLabel.Font = new Font(Font, FontStyle.Bold);
+        _stageLabel.AutoSize = true;
+        _stageLabel.Dock = DockStyle.Fill;
 
-label {
-  font-weight: 700;
-  font-size: 14px;
-}
+        _fileCountLabel.Text = "0 / 0 files";
+        _fileCountLabel.AutoSize = true;
+        _fileCountLabel.Dock = DockStyle.Fill;
+        _fileCountLabel.TextAlign = ContentAlignment.MiddleRight;
 
-input {
-  width: 100%;
-  min-height: 40px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 8px 10px;
-  background: #ffffff;
-  color: var(--text);
-}
+        _messageLabel.Text = "入力して生成を開始してください。";
+        _messageLabel.AutoSize = true;
+        _messageLabel.Dock = DockStyle.Fill;
+        _messageLabel.ForeColor = SystemColors.GrayText;
 
-input:focus,
-textarea:focus {
-  outline: 2px solid rgba(40, 124, 107, 0.22);
-  border-color: var(--accent);
-}
+        _progressBar.Dock = DockStyle.Fill;
+        _progressBar.Height = 18;
+        _progressBar.Style = ProgressBarStyle.Continuous;
 
-.hint {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
+        _outputLabel.Text = "出力なし";
+        _outputLabel.AutoSize = true;
+        _outputLabel.Dock = DockStyle.Fill;
+        _outputLabel.ForeColor = SystemColors.GrayText;
 
-.actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
+        panel.Controls.Add(_stageLabel, 0, 0);
+        panel.Controls.Add(_fileCountLabel, 1, 0);
+        panel.Controls.Add(_messageLabel, 0, 1);
+        panel.SetColumnSpan(_messageLabel, 2);
+        panel.Controls.Add(_progressBar, 0, 2);
+        panel.SetColumnSpan(_progressBar, 2);
+        panel.Controls.Add(_outputLabel, 0, 3);
+        panel.SetColumnSpan(_outputLabel, 2);
 
-button {
-  min-height: 40px;
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  padding: 8px 16px;
-  background: var(--accent);
-  color: #ffffff;
-  cursor: pointer;
-  font-weight: 700;
-}
+        return panel;
+    }
 
-button:hover {
-  background: var(--accent-strong);
-}
+    private Control BuildOutputSplit()
+    {
+        var split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            Orientation = Orientation.Horizontal,
+            SplitterDistance = 190,
+            Panel1MinSize = 120,
+            Panel2MinSize = 220
+        };
 
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.62;
-}
+        split.Panel1.Controls.Add(BuildTextSection("ログ", _logTextBox, readOnly: true));
+        split.Panel2.Controls.Add(BuildTextSection("Mermaid", _mermaidTextBox, readOnly: false));
+        return split;
+    }
 
-button.secondary {
-  border-color: var(--line);
-  background: var(--surface-strong);
-  color: var(--text);
-}
+    private static Control BuildTextSection(string title, TextBox textBox, bool readOnly)
+    {
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2
+        };
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-.progress-panel {
-  padding: 20px;
-}
+        var label = new Label
+        {
+            Text = title,
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
+            Padding = new Padding(0, 0, 0, 4)
+        };
 
-.progress-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 18px;
-  align-items: flex-start;
-}
+        textBox.Dock = DockStyle.Fill;
+        textBox.Multiline = true;
+        textBox.ScrollBars = ScrollBars.Both;
+        textBox.WordWrap = false;
+        textBox.ReadOnly = readOnly;
+        textBox.Font = new Font("Consolas", 10);
 
-.progress-head h2 {
-  margin: 0;
-  font-size: 18px;
-}
+        panel.Controls.Add(label, 0, 0);
+        panel.Controls.Add(textBox, 0, 1);
+        return panel;
+    }
 
-.progress-head p {
-  margin: 6px 0 0;
-  color: var(--muted);
-  line-height: 1.45;
-}
+    private void BrowseProjectFolder(object? sender, EventArgs e)
+    {
+        if (TrySelectFolder("対象プロジェクトフォルダを選択", _projectFolderTextBox.Text, out var folder))
+        {
+            _projectFolderTextBox.Text = folder;
+            if (string.IsNullOrWhiteSpace(_searchFolderTextBox.Text))
+            {
+                _searchFolderTextBox.Text = folder;
+            }
+        }
+    }
 
-#percentLabel {
-  font-size: 24px;
-  line-height: 1;
-  white-space: nowrap;
-}
+    private void BrowseSearchFolder(object? sender, EventArgs e)
+    {
+        if (TrySelectFolder("検索対象フォルダを選択", _searchFolderTextBox.Text, out var folder))
+        {
+            _searchFolderTextBox.Text = folder;
+        }
+    }
 
-.progress-track {
-  height: 12px;
-  margin-top: 18px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--surface-strong);
-}
+    private void BrowseSearchFile(object? sender, EventArgs e)
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Title = "検索対象ファイルを選択",
+            Filter = "C# files (*.cs)|*.cs|All files (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false
+        };
 
-.progress-bar {
-  width: 0%;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--accent);
-  transition: width 180ms ease;
-}
+        if (!string.IsNullOrWhiteSpace(_searchFolderTextBox.Text) && Directory.Exists(_searchFolderTextBox.Text))
+        {
+            dialog.InitialDirectory = _searchFolderTextBox.Text;
+        }
 
-.metrics {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 12px 0 16px;
-  color: var(--muted);
-  font-size: 13px;
-}
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            _searchFileTextBox.Text = dialog.FileName;
+        }
+    }
 
-.log-output,
-.mermaid-output {
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #fbfcfd;
-  color: var(--text);
-}
+    private void BrowseOutputPath(object? sender, EventArgs e)
+    {
+        using var dialog = new SaveFileDialog
+        {
+            Title = "出力先を選択",
+            Filter = "Mermaid files (*.mmd)|*.mmd|Markdown files (*.md)|*.md|All files (*.*)|*.*",
+            DefaultExt = "mmd",
+            OverwritePrompt = true
+        };
 
-.log-output {
-  min-height: 130px;
-  max-height: 220px;
-  margin: 0 0 14px;
-  padding: 12px;
-  overflow: auto;
-  white-space: pre-wrap;
-}
+        if (!string.IsNullOrWhiteSpace(_outputPathTextBox.Text))
+        {
+            var directory = Path.GetDirectoryName(_outputPathTextBox.Text);
+            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            {
+                dialog.InitialDirectory = directory;
+            }
+            dialog.FileName = Path.GetFileName(_outputPathTextBox.Text);
+        }
 
-.mermaid-output {
-  min-height: 300px;
-  resize: vertical;
-  padding: 12px;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 13px;
-  line-height: 1.5;
-}
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            _outputPathTextBox.Text = dialog.FileName;
+        }
+    }
 
-@media (max-width: 860px) {
-  .app-shell {
-    width: min(100vw - 20px, 680px);
-    padding: 18px 0;
-  }
+    private static bool TrySelectFolder(string description, string currentValue, out string folder)
+    {
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = description,
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = false
+        };
 
-  .top-bar,
-  .workspace {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
+        if (!string.IsNullOrWhiteSpace(currentValue) && Directory.Exists(currentValue))
+        {
+            dialog.SelectedPath = currentValue;
+        }
 
-  .status-pill {
-    width: fit-content;
-  }
+        if (dialog.ShowDialog() == DialogResult.OK)
+        {
+            folder = dialog.SelectedPath;
+            return true;
+        }
 
-  .metrics {
-    display: grid;
-  }
+        folder = string.Empty;
+        return false;
+    }
+
+    private async void GenerateButton_Click(object? sender, EventArgs e)
+    {
+        if (!TryCreateRequest(out var request))
+        {
+            return;
+        }
+
+        _generationCancellation = new CancellationTokenSource();
+        SetRunning(true);
+        ResetProgress();
+        AppendLog("Generating Mermaid class diagram...");
+
+        try
+        {
+            var progress = new Progress<GenerationProgress>(ReportProgress);
+            var result = await Task.Run(
+                () => _service.GenerateAsync(request, progress, _generationCancellation.Token));
+
+            _mermaidTextBox.Text = result.Mermaid;
+            _outputLabel.Text = $"出力: {result.OutputPath}";
+            _stageLabel.Text = "完了";
+            _messageLabel.Text = $"生成完了: {result.TypeCount} types, {result.RelationshipCount} relationships";
+            AppendLog($"Wrote {result.OutputPath}");
+        }
+        catch (OperationCanceledException)
+        {
+            _stageLabel.Text = "キャンセル";
+            _messageLabel.Text = "処理をキャンセルしました。";
+            AppendLog("Canceled.");
+        }
+        catch (Exception ex)
+        {
+            _stageLabel.Text = "失敗";
+            _messageLabel.Text = ex.Message;
+            AppendLog(ex.ToString());
+            MessageBox.Show(this, ex.Message, "生成に失敗しました", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _generationCancellation.Dispose();
+            _generationCancellation = null;
+            SetRunning(false);
+        }
+    }
+
+    private void CancelButton_Click(object? sender, EventArgs e)
+    {
+        _generationCancellation?.Cancel();
+    }
+
+    private bool TryCreateRequest(out GenerationRequest request)
+    {
+        var projectFolder = _projectFolderTextBox.Text.Trim();
+        var searchFolder = _searchFolderTextBox.Text.Trim();
+        var searchFile = _searchFileTextBox.Text.Trim();
+        var outputPath = _outputPathTextBox.Text.Trim();
+
+        if (string.IsNullOrWhiteSpace(projectFolder))
+        {
+            ShowValidationError("対象プロジェクトフォルダを入力してください。");
+            request = default!;
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(searchFile) && string.IsNullOrWhiteSpace(searchFolder))
+        {
+            ShowValidationError("検索対象ファイルが空の場合は、検索対象フォルダを入力してください。");
+            request = default!;
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            ShowValidationError("出力先を入力してください。");
+            request = default!;
+            return false;
+        }
+
+        request = new GenerationRequest(
+            projectFolder,
+            searchFolder,
+            string.IsNullOrWhiteSpace(searchFile) ? null : searchFile,
+            outputPath);
+        return true;
+    }
+
+    private void ShowValidationError(string message)
+    {
+        MessageBox.Show(this, message, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+    }
+
+    private void ReportProgress(GenerationProgress progress)
+    {
+        _stageLabel.Text = progress.Stage;
+        _messageLabel.Text = progress.Message;
+        _fileCountLabel.Text = $"{progress.ProcessedFiles} / {progress.TotalFiles} files";
+        _progressBar.Value = Math.Clamp(progress.Percent, _progressBar.Minimum, _progressBar.Maximum);
+        AppendLog(progress.Message);
+    }
+
+    private void ResetProgress()
+    {
+        _progressBar.Value = 0;
+        _stageLabel.Text = "処理中";
+        _messageLabel.Text = "開始しています...";
+        _fileCountLabel.Text = "0 / 0 files";
+        _outputLabel.Text = "出力なし";
+        _logTextBox.Clear();
+        _mermaidTextBox.Clear();
+    }
+
+    private void SetRunning(bool running)
+    {
+        _generateButton.Enabled = !running;
+        _cancelButton.Enabled = running;
+        Cursor = running ? Cursors.WaitCursor : Cursors.Default;
+    }
+
+    private void AppendLog(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        _logTextBox.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}");
+    }
 }
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
@@ -1901,20 +1662,18 @@ MARKER="__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__"
 FILES=(
   ".gitignore"
   "global.json"
-  "ClassDiagramMaker.sln"
   "README.md"
+  "src/ClassDiagramMaker.Core/ClassDiagramMaker.Core.csproj"
+  "src/ClassDiagramMaker.Core/Analysis/ClassDiagramService.cs"
+  "src/ClassDiagramMaker.Core/Analysis/DiagramModel.cs"
+  "src/ClassDiagramMaker.Core/Analysis/GenerationContracts.cs"
+  "src/ClassDiagramMaker.Core/Analysis/MermaidRenderer.cs"
+  "src/ClassDiagramMaker.Core/Analysis/RelationshipBuilder.cs"
+  "src/ClassDiagramMaker.Core/Analysis/SyntaxTypeCollector.cs"
+  "src/ClassDiagramMaker.Core/Analysis/TypeReferenceCollector.cs"
   "src/ClassDiagramMaker/ClassDiagramMaker.csproj"
   "src/ClassDiagramMaker/Program.cs"
-  "src/ClassDiagramMaker/Analysis/ClassDiagramService.cs"
-  "src/ClassDiagramMaker/Analysis/DiagramModel.cs"
-  "src/ClassDiagramMaker/Analysis/GenerationContracts.cs"
-  "src/ClassDiagramMaker/Analysis/MermaidRenderer.cs"
-  "src/ClassDiagramMaker/Analysis/RelationshipBuilder.cs"
-  "src/ClassDiagramMaker/Analysis/SyntaxTypeCollector.cs"
-  "src/ClassDiagramMaker/Analysis/TypeReferenceCollector.cs"
-  "src/ClassDiagramMaker/wwwroot/app.js"
-  "src/ClassDiagramMaker/wwwroot/index.html"
-  "src/ClassDiagramMaker/wwwroot/styles.css"
+  "src/ClassDiagramMaker/MainForm.cs"
   "tools/generate-bootstrap.sh"
 )
 
@@ -1934,7 +1693,7 @@ FILES=(
 
   printf '%s\n' 'chmod +x "$TARGET_DIR/tools/generate-bootstrap.sh"'
   printf '%s\n' 'echo "Created ClassDiagramMaker source at $TARGET_DIR"'
-  printf '%s\n' 'echo "Run: cd $TARGET_DIR && dotnet run --project src/ClassDiagramMaker/ClassDiagramMaker.csproj"'
+  printf '%s\n' 'echo "Run on Windows: cd $TARGET_DIR && dotnet run --project src/ClassDiagramMaker/ClassDiagramMaker.csproj"'
 } > "$OUTPUT_FILE"
 
 chmod +x "$OUTPUT_FILE"
@@ -1944,4 +1703,4 @@ __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
 chmod +x "$TARGET_DIR/tools/generate-bootstrap.sh"
 echo "Created ClassDiagramMaker source at $TARGET_DIR"
-echo "Run: cd $TARGET_DIR && dotnet run --project src/ClassDiagramMaker/ClassDiagramMaker.csproj"
+echo "Run on Windows: cd $TARGET_DIR && dotnet run --project src/ClassDiagramMaker/ClassDiagramMaker.csproj"
