@@ -1,90 +1,100 @@
 # ClassDiagramMaker
 
-C# source analyzer for generating Mermaid class diagrams from selected files and directories.
+指定した C# のファイルやディレクトリを解析し、Mermaid のクラス図を生成するツールです。
 
-The GUI is a Windows-first WinForms application.
+GUI は Windows 向けの WinForms アプリケーションです。
 
-## Requirements
+## 必要環境
 
 - .NET SDK 9.0
-- Windows for running the WinForms GUI
+- WinForms GUI を実行する場合は Windows
 
-The repository includes `global.json` to use the .NET 9 SDK even when newer SDKs are installed.
+このリポジトリには `global.json` が含まれているため、新しい SDK がインストールされている環境でも .NET 9 SDK を使用します。
 
-## Run
+## 実行方法
 
 ```bash
 dotnet restore src/ClassDiagramMaker/ClassDiagramMaker.csproj
 dotnet run --project src/ClassDiagramMaker/ClassDiagramMaker.csproj
 ```
 
-Fill in the WinForms screen:
+WinForms 画面で次の項目を指定します。
 
-- Target project folder
-- Search folder
-- Search file, optional
-- Output path for the generated `.mmd` file
+- 対象プロジェクトフォルダ
+- 検索対象フォルダ
+- 検索対象ファイル、任意
+- 生成する `.mmd` ファイルの出力先
 
-The GUI also provides output options for large projects:
+検索対象ファイルが空の場合は、検索対象フォルダ配下の `.cs`、`.cshtml.cs`、`.cshtml` ファイルを再帰的に解析します。GUI では解析中とレンダリング中の進捗を確認できます。
 
-- Display mode: type only, key members, or all members
-- Relationships: inheritance, interface implementation, field/property association, and method dependency can be toggled independently
-- Split output: generate separate Mermaid files by namespace or folder, with optional `index.md` and all-in-one diagram files
+## 表示オプション
 
-When the search file is empty, the tool recursively analyzes `.cs`, `.cshtml.cs`, and `.cshtml` files under the search folder. The GUI shows parsing and rendering progress while the Mermaid file is generated.
+GUI では巨大なプロジェクトでも見やすくするため、出力内容を調整できます。
 
-Razor `.cshtml` files are represented as Razor page nodes. The analyzer includes `@model`, `@inject`, and members declared in `@functions` / `@code` blocks. `.cshtml.cs` code-behind files are parsed as normal C# source.
+- 表示モード: 型だけ、主要メンバー、全メンバー
+- 関係線: 継承、interface 実装、フィールド/プロパティ関連、メソッド依存を個別に切り替え
+- 分割出力: namespace 単位またはフォルダ単位で Mermaid ファイルを分割し、任意で `index.md` と全体図を生成
 
-When a single Razor file is selected, the pair is analyzed together:
+## Razor 対応
 
-- Selecting `Page.cshtml` also analyzes `Page.cshtml.cs` when it exists.
-- Selecting `Page.cshtml.cs` also analyzes `Page.cshtml` when it exists.
+Razor の `.cshtml` ファイルは Razor ページのノードとして表現されます。解析対象は次の要素です。
 
-## Tests
+- `@model`
+- `@inject`
+- `@functions` / `@code` ブロックに定義されたメンバー
 
-Core analysis behavior is covered with xUnit.
+`.cshtml.cs` の code-behind ファイルは通常の C# ソースとして解析します。
+
+単一の Razor ファイルを指定した場合は、対応するペアも一緒に解析します。
+
+- `Page.cshtml` を選択すると、存在する場合は `Page.cshtml.cs` も解析します。
+- `Page.cshtml.cs` を選択すると、存在する場合は `Page.cshtml` も解析します。
+
+## テスト
+
+Core の解析処理は xUnit でテストしています。
 
 ```bash
 dotnet test ClassDiagramMaker.sln
 ```
 
-## Release
+## リリース
 
-Build a single Windows executable with PowerShell:
+PowerShell で Windows 用の単一 exe を生成できます。
 
 ```powershell
 ./tools/publish-single-exe.ps1
 ```
 
-The default output is:
+既定の出力先は次の通りです。
 
 ```text
 artifacts/win-x64-single-file/ClassDiagramMaker.exe
 ```
 
-To publish another Windows runtime:
+別の Windows runtime 向けに publish する場合は、`-Runtime` を指定します。
 
 ```powershell
 ./tools/publish-single-exe.ps1 -Runtime win-arm64
 ./tools/publish-single-exe.ps1 -Runtime win-x86
 ```
 
-The equivalent `dotnet publish` command is:
+同等の `dotnet publish` コマンドは次の通りです。
 
 ```bash
 dotnet publish src/ClassDiagramMaker/ClassDiagramMaker.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishTrimmed=false -p:DebugType=none -p:DebugSymbols=false -p:CopyOutputSymbolsToPublishDirectory=false -o artifacts/win-x64-single-file
 ```
 
-The publish profile `win-x64-single-file` is also available:
+publish profile `win-x64-single-file` も利用できます。
 
 ```bash
 dotnet publish src/ClassDiagramMaker/ClassDiagramMaker.csproj -p:PublishProfile=win-x64-single-file
 ```
 
-## Split Output
+## 分割出力
 
-When split output is enabled, the selected output path is used as a file name prefix.
-For example, `diagram.mmd` can generate:
+分割出力を有効にすると、指定した出力先のファイル名がプレフィックスとして使われます。
+たとえば `diagram.mmd` を指定すると、次のようなファイルを生成できます。
 
 ```text
 diagram.index.md
@@ -93,11 +103,13 @@ diagram.Demo.Services.mmd
 diagram.Demo.Models.mmd
 ```
 
-Namespace splitting groups types by C# namespace. Folder splitting groups types by their source folder relative to the target project folder. Relationships in split diagrams are limited to types inside the same split file, while the optional `*.all.mmd` keeps the full diagram.
+namespace 分割では C# の namespace ごとに型をまとめます。フォルダ分割では、対象プロジェクトフォルダから見たソースファイルの配置ごとに型をまとめます。
 
-## Output
+分割された図では、同じ分割ファイル内にある型同士の関係だけを出力します。任意で生成できる `*.all.mmd` には全体図を保持します。
 
-The first supported output format is Mermaid `classDiagram`.
+## 出力形式
+
+最初に対応している出力形式は Mermaid の `classDiagram` です。
 
 ```mermaid
 classDiagram
@@ -119,13 +131,15 @@ classDiagram
 
 ## Bootstrap
 
-For users who cannot download the repository, this project provides a generated single-file bootstrap script:
+リポジトリをダウンロードできないユーザー向けに、単一ファイルの bootstrap スクリプトを用意しています。
 
 ```bash
 ./bootstrap/ClassDiagramMaker.bootstrap.sh ./ClassDiagramMaker
 ```
 
-The script recreates the app and core source tree locally. It intentionally does not include xUnit test code. Regenerate it after source changes with:
+このスクリプトはアプリ本体と Core のソースツリーをローカルに再作成します。xUnit のテストコードは意図的に含めていません。
+
+ソース変更後に bootstrap を再生成する場合は、次のコマンドを実行します。
 
 ```bash
 ./tools/generate-bootstrap.sh
