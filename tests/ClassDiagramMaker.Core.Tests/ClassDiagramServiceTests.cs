@@ -126,6 +126,45 @@ public sealed class ClassDiagramServiceTests
         Assert.All(updates.Where(update => update.TotalFiles > 0), update => Assert.Equal(1, update.TotalFiles));
     }
 
+    [Fact]
+    public async Task GenerateAsync_RendersModifiersAndGenericConstraints()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Repository.cs",
+            """
+            namespace Demo;
+
+            public abstract class Repository<T>
+                where T : class, new()
+            {
+                protected static readonly string CacheKey = typeof(T).Name;
+
+                public abstract T Create<TArg>(TArg arg)
+                    where TArg : struct;
+            }
+
+            public readonly struct Snapshot<T>
+                where T : unmanaged
+            {
+                public static int Count { get; }
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath),
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Contains("<<abstract>>", result.Mermaid);
+        Assert.Contains("<<readonly>>", result.Mermaid);
+        Assert.Contains("where T : class, new()", result.Mermaid);
+        Assert.Contains("where T : unmanaged", result.Mermaid);
+        Assert.Contains("#{static readonly} CacheKey: string", result.Mermaid);
+        Assert.Contains("+{abstract} Create~TArg~(arg: TArg): T where TArg : struct", result.Mermaid);
+        Assert.Contains("+{static} Count: int", result.Mermaid);
+    }
+
     private sealed class TestWorkspace : IDisposable
     {
         private TestWorkspace(string root)

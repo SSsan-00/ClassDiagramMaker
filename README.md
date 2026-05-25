@@ -42,6 +42,12 @@ The first supported output format is Mermaid `classDiagram`.
 ```mermaid
 classDiagram
     direction LR
+    class Repository_T {
+        <<abstract>>
+        where T : class, new()
+        #{static readonly} CacheKey: string
+        +{abstract} Create~TArg~(arg: TArg): T where TArg : struct
+    }
     UserRepository <|.. UserService
     UserService --> UserRepository : repository
 ```

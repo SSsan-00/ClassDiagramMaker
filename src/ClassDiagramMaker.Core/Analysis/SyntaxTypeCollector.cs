@@ -44,6 +44,7 @@ internal static class SyntaxTypeCollector
             Accessibility = GetAccessibility(declaration.Modifiers, isTypeDeclaration: true),
             Modifiers = GetNonAccessibilityModifiers(declaration.Modifiers),
             TypeParameters = typeParameters,
+            TypeParameterConstraints = GetTypeParameterConstraints(declaration),
             BaseTypes = GetBaseTypes(declaration),
             Members = GetMembers(declaration)
         };
@@ -61,6 +62,13 @@ internal static class SyntaxTypeCollector
     {
         return declaration is TypeDeclarationSyntax typeDeclaration && typeDeclaration.TypeParameterList is not null
             ? typeDeclaration.TypeParameterList.Parameters.Select(parameter => parameter.Identifier.ValueText).ToArray()
+            : Array.Empty<string>();
+    }
+
+    private static IReadOnlyList<string> GetTypeParameterConstraints(BaseTypeDeclarationSyntax declaration)
+    {
+        return declaration is TypeDeclarationSyntax typeDeclaration
+            ? FormatConstraintClauses(typeDeclaration.ConstraintClauses)
             : Array.Empty<string>();
     }
 
@@ -182,8 +190,9 @@ internal static class SyntaxTypeCollector
                 Name = variable.Identifier.ValueText,
                 Type = type,
                 Visibility = GetVisibilitySymbol(field.Modifiers),
-                Signature = $"{GetVisibilitySymbol(field.Modifiers)}{variable.Identifier.ValueText}: {type}",
+                Signature = CreateMemberSignature(field.Modifiers, $"{variable.Identifier.ValueText}: {type}"),
                 IsStatic = HasModifier(field.Modifiers, SyntaxKind.StaticKeyword),
+                Modifiers = GetNonAccessibilityModifiers(field.Modifiers),
                 ReferencedTypes = TypeReferenceCollector.Collect(field.Declaration.Type)
             };
         }
@@ -198,8 +207,9 @@ internal static class SyntaxTypeCollector
             Name = property.Identifier.ValueText,
             Type = type,
             Visibility = GetVisibilitySymbol(property.Modifiers),
-            Signature = $"{GetVisibilitySymbol(property.Modifiers)}{property.Identifier.ValueText}: {type}",
+            Signature = CreateMemberSignature(property.Modifiers, $"{property.Identifier.ValueText}: {type}"),
             IsStatic = HasModifier(property.Modifiers, SyntaxKind.StaticKeyword),
+            Modifiers = GetNonAccessibilityModifiers(property.Modifiers),
             ReferencedTypes = TypeReferenceCollector.Collect(property.Type)
         };
     }
@@ -207,11 +217,20 @@ internal static class SyntaxTypeCollector
     private static DiagramMember CreateMethodMember(MethodDeclarationSyntax method)
     {
         var returnType = method.ReturnType.ToString();
+        var typeParameters = method.TypeParameterList is null
+            ? string.Empty
+            : $"<{string.Join(", ", method.TypeParameterList.Parameters.Select(parameter => parameter.Identifier.ValueText))}>";
         var parameters = FormatParameters(method.ParameterList.Parameters);
+        var constraints = FormatConstraintClauses(method.ConstraintClauses);
         var references = TypeReferenceCollector.Collect(method.ReturnType)
             .Concat(method.ParameterList.Parameters.SelectMany(parameter => TypeReferenceCollector.Collect(parameter.Type)))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+        var coreSignature = $"{method.Identifier.ValueText}{typeParameters}({parameters}): {returnType}";
+        if (constraints.Count > 0)
+        {
+            coreSignature = $"{coreSignature} {string.Join(" ", constraints)}";
+        }
 
         return new DiagramMember
         {
@@ -219,8 +238,10 @@ internal static class SyntaxTypeCollector
             Name = method.Identifier.ValueText,
             Type = returnType,
             Visibility = GetVisibilitySymbol(method.Modifiers),
-            Signature = $"{GetVisibilitySymbol(method.Modifiers)}{method.Identifier.ValueText}({parameters}): {returnType}",
+            Signature = CreateMemberSignature(method.Modifiers, coreSignature),
             IsStatic = HasModifier(method.Modifiers, SyntaxKind.StaticKeyword),
+            Modifiers = GetNonAccessibilityModifiers(method.Modifiers),
+            TypeParameterConstraints = constraints,
             ReferencedTypes = references
         };
     }
@@ -239,8 +260,9 @@ internal static class SyntaxTypeCollector
             Name = constructor.Identifier.ValueText,
             Type = string.Empty,
             Visibility = GetVisibilitySymbol(constructor.Modifiers),
-            Signature = $"{GetVisibilitySymbol(constructor.Modifiers)}{constructor.Identifier.ValueText}({parameters})",
+            Signature = CreateMemberSignature(constructor.Modifiers, $"{constructor.Identifier.ValueText}({parameters})"),
             IsStatic = HasModifier(constructor.Modifiers, SyntaxKind.StaticKeyword),
+            Modifiers = GetNonAccessibilityModifiers(constructor.Modifiers),
             ReferencedTypes = references
         };
     }
@@ -254,8 +276,9 @@ internal static class SyntaxTypeCollector
             Name = eventDeclaration.Identifier.ValueText,
             Type = type,
             Visibility = GetVisibilitySymbol(eventDeclaration.Modifiers),
-            Signature = $"{GetVisibilitySymbol(eventDeclaration.Modifiers)}{eventDeclaration.Identifier.ValueText}: {type}",
+            Signature = CreateMemberSignature(eventDeclaration.Modifiers, $"{eventDeclaration.Identifier.ValueText}: {type}"),
             IsStatic = HasModifier(eventDeclaration.Modifiers, SyntaxKind.StaticKeyword),
+            Modifiers = GetNonAccessibilityModifiers(eventDeclaration.Modifiers),
             ReferencedTypes = TypeReferenceCollector.Collect(eventDeclaration.Type)
         };
     }
@@ -271,8 +294,9 @@ internal static class SyntaxTypeCollector
                 Name = variable.Identifier.ValueText,
                 Type = type,
                 Visibility = GetVisibilitySymbol(eventField.Modifiers),
-                Signature = $"{GetVisibilitySymbol(eventField.Modifiers)}{variable.Identifier.ValueText}: {type}",
+                Signature = CreateMemberSignature(eventField.Modifiers, $"{variable.Identifier.ValueText}: {type}"),
                 IsStatic = HasModifier(eventField.Modifiers, SyntaxKind.StaticKeyword),
+                Modifiers = GetNonAccessibilityModifiers(eventField.Modifiers),
                 ReferencedTypes = TypeReferenceCollector.Collect(eventField.Declaration.Type)
             };
         }
@@ -293,8 +317,9 @@ internal static class SyntaxTypeCollector
             Name = "this",
             Type = type,
             Visibility = GetVisibilitySymbol(indexer.Modifiers),
-            Signature = $"{GetVisibilitySymbol(indexer.Modifiers)}this[{parameters}]: {type}",
+            Signature = CreateMemberSignature(indexer.Modifiers, $"this[{parameters}]: {type}"),
             IsStatic = HasModifier(indexer.Modifiers, SyntaxKind.StaticKeyword),
+            Modifiers = GetNonAccessibilityModifiers(indexer.Modifiers),
             ReferencedTypes = references
         };
     }
@@ -306,6 +331,24 @@ internal static class SyntaxTypeCollector
             var type = parameter.Type?.ToString() ?? "var";
             return $"{parameter.Identifier.ValueText}: {type}";
         }));
+    }
+
+    private static IReadOnlyList<string> FormatConstraintClauses(SyntaxList<TypeParameterConstraintClauseSyntax> clauses)
+    {
+        return clauses
+            .Select(clause => $"where {clause.Name} : {string.Join(", ", clause.Constraints.Select(constraint => constraint.ToString()))}")
+            .ToArray();
+    }
+
+    private static string CreateMemberSignature(SyntaxTokenList modifiers, string signature)
+    {
+        var visibility = GetVisibilitySymbol(modifiers);
+        var nonAccessibilityModifiers = GetNonAccessibilityModifiers(modifiers);
+        var modifierText = nonAccessibilityModifiers.Count == 0
+            ? string.Empty
+            : $"{{{string.Join(" ", nonAccessibilityModifiers)}}} ";
+
+        return $"{visibility}{modifierText}{signature}";
     }
 
     private static string GetAccessibility(SyntaxTokenList modifiers, bool isTypeDeclaration)

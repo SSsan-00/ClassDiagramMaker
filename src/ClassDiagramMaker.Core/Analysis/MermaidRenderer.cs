@@ -19,10 +19,14 @@ internal static class MermaidRenderer
             builder.AppendLine($"    %% {type.FullName}");
             builder.AppendLine($"    class {type.Id} {{");
 
-            var stereotype = GetStereotype(type);
-            if (!string.IsNullOrWhiteSpace(stereotype))
+            foreach (var stereotype in GetStereotypes(type))
             {
                 builder.AppendLine($"        <<{stereotype}>>");
+            }
+
+            foreach (var constraint in type.TypeParameterConstraints)
+            {
+                builder.AppendLine($"        {EscapeMemberText(constraint)}");
             }
 
             foreach (var member in type.Members)
@@ -58,9 +62,10 @@ internal static class MermaidRenderer
         };
     }
 
-    private static string GetStereotype(DiagramType type)
+    private static IReadOnlyList<string> GetStereotypes(DiagramType type)
     {
-        return type.Kind switch
+        var stereotypes = new List<string>();
+        var kindStereotype = type.Kind switch
         {
             DiagramTypeKind.Interface => "interface",
             DiagramTypeKind.Struct => "struct",
@@ -68,6 +73,14 @@ internal static class MermaidRenderer
             DiagramTypeKind.Enum => "enumeration",
             _ => string.Empty
         };
+
+        if (!string.IsNullOrWhiteSpace(kindStereotype))
+        {
+            stereotypes.Add(kindStereotype);
+        }
+
+        stereotypes.AddRange(type.Modifiers);
+        return stereotypes;
     }
 
     private static string EscapeMemberText(string value)
@@ -75,8 +88,6 @@ internal static class MermaidRenderer
         return Regex.Replace(value, @"\s+", " ")
             .Replace("<", "~", StringComparison.Ordinal)
             .Replace(">", "~", StringComparison.Ordinal)
-            .Replace("{", "(", StringComparison.Ordinal)
-            .Replace("}", ")", StringComparison.Ordinal)
             .Trim();
     }
 

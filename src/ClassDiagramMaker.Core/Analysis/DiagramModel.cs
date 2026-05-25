@@ -40,6 +40,7 @@ public sealed record DiagramType
     public required string Accessibility { get; init; }
     public IReadOnlyList<string> Modifiers { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> TypeParameters { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> TypeParameterConstraints { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> BaseTypes { get; init; } = Array.Empty<string>();
     public IReadOnlyList<DiagramMember> Members { get; init; } = Array.Empty<DiagramMember>();
 }
@@ -52,6 +53,8 @@ public sealed record DiagramMember
     public required string Visibility { get; init; }
     public required string Signature { get; init; }
     public bool IsStatic { get; init; }
+    public IReadOnlyList<string> Modifiers { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> TypeParameterConstraints { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> ReferencedTypes { get; init; } = Array.Empty<string>();
 }
 
