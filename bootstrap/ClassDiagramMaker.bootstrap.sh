@@ -1493,25 +1493,25 @@ internal static class SyntaxTypeCollector
             switch (member)
             {
                 case FieldDeclarationSyntax field:
-                    members.AddRange(CreateFieldMembers(field));
+                    members.AddRange(CreateFieldMembers(field, typeDeclaration));
                     break;
                 case PropertyDeclarationSyntax property:
-                    members.Add(CreatePropertyMember(property));
+                    members.Add(CreatePropertyMember(property, typeDeclaration));
                     break;
                 case MethodDeclarationSyntax method:
-                    members.Add(CreateMethodMember(method));
+                    members.Add(CreateMethodMember(method, typeDeclaration));
                     break;
                 case ConstructorDeclarationSyntax constructor:
                     members.Add(CreateConstructorMember(constructor));
                     break;
                 case EventDeclarationSyntax eventDeclaration:
-                    members.Add(CreateEventMember(eventDeclaration));
+                    members.Add(CreateEventMember(eventDeclaration, typeDeclaration));
                     break;
                 case EventFieldDeclarationSyntax eventField:
-                    members.AddRange(CreateEventFieldMembers(eventField));
+                    members.AddRange(CreateEventFieldMembers(eventField, typeDeclaration));
                     break;
                 case IndexerDeclarationSyntax indexer:
-                    members.Add(CreateIndexerMember(indexer));
+                    members.Add(CreateIndexerMember(indexer, typeDeclaration));
                     break;
             }
         }
@@ -1542,9 +1542,12 @@ internal static class SyntaxTypeCollector
         });
     }
 
-    private static IEnumerable<DiagramMember> CreateFieldMembers(FieldDeclarationSyntax field)
+    private static IEnumerable<DiagramMember> CreateFieldMembers(
+        FieldDeclarationSyntax field,
+        TypeDeclarationSyntax containingType)
     {
         var type = field.Declaration.Type.ToString();
+        var defaultPublic = IsInterfaceMember(containingType);
         foreach (var variable in field.Declaration.Variables)
         {
             yield return new DiagramMember
@@ -1552,8 +1555,8 @@ internal static class SyntaxTypeCollector
                 Kind = DiagramMemberKind.Field,
                 Name = variable.Identifier.ValueText,
                 Type = type,
-                Visibility = GetVisibilitySymbol(field.Modifiers),
-                Signature = CreateMemberSignature(field.Modifiers, $"{variable.Identifier.ValueText}: {type}"),
+                Visibility = GetVisibilitySymbol(field.Modifiers, defaultPublic),
+                Signature = CreateMemberSignature(field.Modifiers, $"{variable.Identifier.ValueText}: {type}", defaultPublic),
                 IsStatic = HasModifier(field.Modifiers, SyntaxKind.StaticKeyword),
                 Modifiers = GetNonAccessibilityModifiers(field.Modifiers),
                 ReferencedTypes = TypeReferenceCollector.Collect(field.Declaration.Type)
@@ -1561,25 +1564,31 @@ internal static class SyntaxTypeCollector
         }
     }
 
-    private static DiagramMember CreatePropertyMember(PropertyDeclarationSyntax property)
+    private static DiagramMember CreatePropertyMember(
+        PropertyDeclarationSyntax property,
+        TypeDeclarationSyntax containingType)
     {
         var type = property.Type.ToString();
+        var defaultPublic = IsInterfaceMember(containingType);
         return new DiagramMember
         {
             Kind = DiagramMemberKind.Property,
             Name = property.Identifier.ValueText,
             Type = type,
-            Visibility = GetVisibilitySymbol(property.Modifiers),
-            Signature = CreateMemberSignature(property.Modifiers, $"{property.Identifier.ValueText}: {type}"),
+            Visibility = GetVisibilitySymbol(property.Modifiers, defaultPublic),
+            Signature = CreateMemberSignature(property.Modifiers, $"{property.Identifier.ValueText}: {type}", defaultPublic),
             IsStatic = HasModifier(property.Modifiers, SyntaxKind.StaticKeyword),
             Modifiers = GetNonAccessibilityModifiers(property.Modifiers),
             ReferencedTypes = TypeReferenceCollector.Collect(property.Type)
         };
     }
 
-    private static DiagramMember CreateMethodMember(MethodDeclarationSyntax method)
+    private static DiagramMember CreateMethodMember(
+        MethodDeclarationSyntax method,
+        TypeDeclarationSyntax containingType)
     {
         var returnType = method.ReturnType.ToString();
+        var defaultPublic = IsInterfaceMember(containingType);
         var typeParameters = method.TypeParameterList is null
             ? string.Empty
             : $"<{string.Join(", ", method.TypeParameterList.Parameters.Select(parameter => parameter.Identifier.ValueText))}>";
@@ -1600,8 +1609,8 @@ internal static class SyntaxTypeCollector
             Kind = DiagramMemberKind.Method,
             Name = method.Identifier.ValueText,
             Type = returnType,
-            Visibility = GetVisibilitySymbol(method.Modifiers),
-            Signature = CreateMemberSignature(method.Modifiers, coreSignature),
+            Visibility = GetVisibilitySymbol(method.Modifiers, defaultPublic),
+            Signature = CreateMemberSignature(method.Modifiers, coreSignature, defaultPublic),
             IsStatic = HasModifier(method.Modifiers, SyntaxKind.StaticKeyword),
             Modifiers = GetNonAccessibilityModifiers(method.Modifiers),
             TypeParameterConstraints = constraints,
@@ -1630,25 +1639,31 @@ internal static class SyntaxTypeCollector
         };
     }
 
-    private static DiagramMember CreateEventMember(EventDeclarationSyntax eventDeclaration)
+    private static DiagramMember CreateEventMember(
+        EventDeclarationSyntax eventDeclaration,
+        TypeDeclarationSyntax containingType)
     {
         var type = eventDeclaration.Type.ToString();
+        var defaultPublic = IsInterfaceMember(containingType);
         return new DiagramMember
         {
             Kind = DiagramMemberKind.Event,
             Name = eventDeclaration.Identifier.ValueText,
             Type = type,
-            Visibility = GetVisibilitySymbol(eventDeclaration.Modifiers),
-            Signature = CreateMemberSignature(eventDeclaration.Modifiers, $"{eventDeclaration.Identifier.ValueText}: {type}"),
+            Visibility = GetVisibilitySymbol(eventDeclaration.Modifiers, defaultPublic),
+            Signature = CreateMemberSignature(eventDeclaration.Modifiers, $"{eventDeclaration.Identifier.ValueText}: {type}", defaultPublic),
             IsStatic = HasModifier(eventDeclaration.Modifiers, SyntaxKind.StaticKeyword),
             Modifiers = GetNonAccessibilityModifiers(eventDeclaration.Modifiers),
             ReferencedTypes = TypeReferenceCollector.Collect(eventDeclaration.Type)
         };
     }
 
-    private static IEnumerable<DiagramMember> CreateEventFieldMembers(EventFieldDeclarationSyntax eventField)
+    private static IEnumerable<DiagramMember> CreateEventFieldMembers(
+        EventFieldDeclarationSyntax eventField,
+        TypeDeclarationSyntax containingType)
     {
         var type = eventField.Declaration.Type.ToString();
+        var defaultPublic = IsInterfaceMember(containingType);
         foreach (var variable in eventField.Declaration.Variables)
         {
             yield return new DiagramMember
@@ -1656,8 +1671,8 @@ internal static class SyntaxTypeCollector
                 Kind = DiagramMemberKind.Event,
                 Name = variable.Identifier.ValueText,
                 Type = type,
-                Visibility = GetVisibilitySymbol(eventField.Modifiers),
-                Signature = CreateMemberSignature(eventField.Modifiers, $"{variable.Identifier.ValueText}: {type}"),
+                Visibility = GetVisibilitySymbol(eventField.Modifiers, defaultPublic),
+                Signature = CreateMemberSignature(eventField.Modifiers, $"{variable.Identifier.ValueText}: {type}", defaultPublic),
                 IsStatic = HasModifier(eventField.Modifiers, SyntaxKind.StaticKeyword),
                 Modifiers = GetNonAccessibilityModifiers(eventField.Modifiers),
                 ReferencedTypes = TypeReferenceCollector.Collect(eventField.Declaration.Type)
@@ -1665,9 +1680,12 @@ internal static class SyntaxTypeCollector
         }
     }
 
-    private static DiagramMember CreateIndexerMember(IndexerDeclarationSyntax indexer)
+    private static DiagramMember CreateIndexerMember(
+        IndexerDeclarationSyntax indexer,
+        TypeDeclarationSyntax containingType)
     {
         var type = indexer.Type.ToString();
+        var defaultPublic = IsInterfaceMember(containingType);
         var parameters = FormatParameters(indexer.ParameterList.Parameters);
         var references = TypeReferenceCollector.Collect(indexer.Type)
             .Concat(indexer.ParameterList.Parameters.SelectMany(parameter => TypeReferenceCollector.Collect(parameter.Type)))
@@ -1679,8 +1697,8 @@ internal static class SyntaxTypeCollector
             Kind = DiagramMemberKind.Indexer,
             Name = "this",
             Type = type,
-            Visibility = GetVisibilitySymbol(indexer.Modifiers),
-            Signature = CreateMemberSignature(indexer.Modifiers, $"this[{parameters}]: {type}"),
+            Visibility = GetVisibilitySymbol(indexer.Modifiers, defaultPublic),
+            Signature = CreateMemberSignature(indexer.Modifiers, $"this[{parameters}]: {type}", defaultPublic),
             IsStatic = HasModifier(indexer.Modifiers, SyntaxKind.StaticKeyword),
             Modifiers = GetNonAccessibilityModifiers(indexer.Modifiers),
             ReferencedTypes = references
@@ -1703,9 +1721,12 @@ internal static class SyntaxTypeCollector
             .ToArray();
     }
 
-    private static string CreateMemberSignature(SyntaxTokenList modifiers, string signature)
+    private static string CreateMemberSignature(
+        SyntaxTokenList modifiers,
+        string signature,
+        bool defaultPublic = false)
     {
-        var visibility = GetVisibilitySymbol(modifiers);
+        var visibility = GetVisibilitySymbol(modifiers, defaultPublic);
         var nonAccessibilityModifiers = GetNonAccessibilityModifiers(modifiers);
         var modifierText = nonAccessibilityModifiers.Count == 0
             ? string.Empty
@@ -1714,7 +1735,10 @@ internal static class SyntaxTypeCollector
         return $"{visibility}{modifierText}{signature}";
     }
 
-    private static string GetAccessibility(SyntaxTokenList modifiers, bool isTypeDeclaration)
+    private static string GetAccessibility(
+        SyntaxTokenList modifiers,
+        bool isTypeDeclaration,
+        bool defaultPublic = false)
     {
         if (modifiers.Any(SyntaxKind.PublicKeyword))
         {
@@ -1746,12 +1770,19 @@ internal static class SyntaxTypeCollector
             return "file";
         }
 
+        if (defaultPublic)
+        {
+            return "public";
+        }
+
         return isTypeDeclaration ? "internal" : "private";
     }
 
-    private static string GetVisibilitySymbol(SyntaxTokenList modifiers)
+    private static string GetVisibilitySymbol(
+        SyntaxTokenList modifiers,
+        bool defaultPublic = false)
     {
-        return GetAccessibility(modifiers, isTypeDeclaration: false) switch
+        return GetAccessibility(modifiers, isTypeDeclaration: false, defaultPublic) switch
         {
             "public" => "+",
             "protected" => "#",
@@ -1773,6 +1804,11 @@ internal static class SyntaxTypeCollector
     private static bool HasModifier(SyntaxTokenList modifiers, SyntaxKind kind)
     {
         return modifiers.Any(kind);
+    }
+
+    private static bool IsInterfaceMember(TypeDeclarationSyntax containingType)
+    {
+        return containingType is InterfaceDeclarationSyntax;
     }
 }
 

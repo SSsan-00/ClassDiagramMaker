@@ -300,6 +300,195 @@ public sealed class ClassDiagramServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_ParsesNestedTypesAcrossNamespaceStyles()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "FileScoped.cs",
+            """
+            namespace Demo.FileScoped;
+
+            public abstract partial class Repository<T>
+                where T : class
+            {
+                protected sealed class Entry
+                {
+                    public T Value { get; }
+                }
+            }
+            """);
+        workspace.WriteSource(
+            "BlockScoped.cs",
+            """
+            namespace Demo.BlockScoped
+            {
+                internal readonly record struct Snapshot<T>(T Value)
+                    where T : unmanaged;
+
+                public enum SnapshotState
+                {
+                    Created,
+                    Saved
+                }
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath),
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Equal(4, result.TypeCount);
+        Assert.Contains("class Demo_FileScoped_Repository_T", result.Mermaid);
+        Assert.Contains("<<abstract>>", result.Mermaid);
+        Assert.Contains("where T : class", result.Mermaid);
+        Assert.Contains("class Demo_FileScoped_Repository_T_Entry", result.Mermaid);
+        Assert.Contains("<<sealed>>", result.Mermaid);
+        Assert.Contains("+Value: T", result.Mermaid);
+        Assert.Contains("class Demo_BlockScoped_Snapshot_T", result.Mermaid);
+        Assert.Contains("<<record>>", result.Mermaid);
+        Assert.Contains("<<readonly>>", result.Mermaid);
+        Assert.Contains("where T : unmanaged", result.Mermaid);
+        Assert.Contains("class Demo_BlockScoped_SnapshotState", result.Mermaid);
+        Assert.Contains("<<enumeration>>", result.Mermaid);
+        Assert.Contains("Created", result.Mermaid);
+        Assert.Contains("Saved", result.Mermaid);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ParsesInterfaceMembersWithImplicitPublicVisibility()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "IRepository.cs",
+            """
+            namespace Demo;
+
+            public interface IRepository<T>
+            {
+                T Current { get; }
+                event System.EventHandler Changed;
+                T this[int index] { get; }
+                T Find<TQuery>(TQuery query)
+                    where TQuery : class;
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath),
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Contains("class Demo_IRepository_T", result.Mermaid);
+        Assert.Contains("<<interface>>", result.Mermaid);
+        Assert.Contains("+Current: T", result.Mermaid);
+        Assert.Contains("+Changed: System.EventHandler", result.Mermaid);
+        Assert.Contains("+this[index: int]: T", result.Mermaid);
+        Assert.Contains("+Find~TQuery~(query: TQuery): T where TQuery : class", result.Mermaid);
+        Assert.DoesNotContain("-Current: T", result.Mermaid);
+        Assert.DoesNotContain("-Find~TQuery~", result.Mermaid);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_CollectsReferencesFromGenericArrayTupleNullableAndAliasQualifiedTypes()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Aggregate.cs",
+            """
+            namespace Demo;
+
+            public sealed class Aggregate
+            {
+                private readonly System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<UserDto?>> users;
+
+                public (UserDto User, UserStatus Status) Get(UserId[] ids, global::Demo.UserDto? fallback) => default;
+            }
+
+            public sealed class UserDto
+            {
+            }
+
+            public sealed class UserId
+            {
+            }
+
+            public enum UserStatus
+            {
+                Active
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath),
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Contains("-{readonly} users: System.Collections.Generic.IReadOnlyDictionary~string, System.Collections.Generic.IReadOnlyList~UserDto?~~", result.Mermaid);
+        Assert.Contains("Demo_Aggregate --> Demo_UserDto : users", result.Mermaid);
+        Assert.Contains("Demo_Aggregate ..> Demo_UserDto : Get", result.Mermaid);
+        Assert.Contains("Demo_Aggregate ..> Demo_UserStatus : Get", result.Mermaid);
+        Assert.Contains("Demo_Aggregate ..> Demo_UserId : Get", result.Mermaid);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_MergesPartialTypesAndPreservesRelationshipsFromEachDeclaration()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "CustomerService.Part1.cs",
+            """
+            namespace Demo;
+
+            public abstract class BaseService
+            {
+            }
+
+            public partial class CustomerService : BaseService
+            {
+                public Customer Current { get; }
+            }
+            """);
+        workspace.WriteSource(
+            "CustomerService.Part2.cs",
+            """
+            namespace Demo;
+
+            public interface ICustomerService
+            {
+            }
+
+            public partial class CustomerService : ICustomerService
+            {
+                public Customer Find(CustomerId id) => new();
+            }
+
+            public sealed class Customer
+            {
+            }
+
+            public sealed class CustomerId
+            {
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath),
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Equal(5, result.TypeCount);
+        Assert.Equal(1, CountOccurrences(result.Mermaid, "class Demo_CustomerService {"));
+        Assert.Contains("<<partial>>", result.Mermaid);
+        Assert.Contains("+Current: Customer", result.Mermaid);
+        Assert.Contains("+Find(id: CustomerId): Customer", result.Mermaid);
+        Assert.Contains("Demo_BaseService <|-- Demo_CustomerService", result.Mermaid);
+        Assert.Contains("Demo_ICustomerService <|.. Demo_CustomerService", result.Mermaid);
+        Assert.Contains("Demo_CustomerService --> Demo_Customer : Current", result.Mermaid);
+        Assert.Contains("Demo_CustomerService ..> Demo_CustomerId : Find", result.Mermaid);
+    }
+
+    [Fact]
     public async Task GenerateAsync_WhenDisplayModeIsTypeOnly_HidesMembersButKeepsTypeMetadata()
     {
         using var workspace = TestWorkspace.Create();
@@ -643,6 +832,25 @@ public sealed class ClassDiagramServiceTests
         Assert.Equal(emptyPath, result.OutputPath);
         Assert.Equal(new[] { emptyPath }, result.OutputPaths);
         Assert.Contains("classDiagram", File.ReadAllText(emptyPath));
+    }
+
+    private static int CountOccurrences(string value, string pattern)
+    {
+        var count = 0;
+        var searchIndex = 0;
+        while (searchIndex < value.Length)
+        {
+            var index = value.IndexOf(pattern, searchIndex, StringComparison.Ordinal);
+            if (index < 0)
+            {
+                break;
+            }
+
+            count++;
+            searchIndex = index + pattern.Length;
+        }
+
+        return count;
     }
 
     private sealed class TestWorkspace : IDisposable
