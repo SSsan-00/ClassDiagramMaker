@@ -101,6 +101,86 @@ public sealed class ClassDiagramServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_IncludesRazorPagesAndCodeBehind()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Pages/Users/Index.cshtml",
+            """
+            @page
+            @model Demo.Pages.Users.IndexModel
+            @inject Demo.Services.IUserRepository Repository
+
+            <h1>@Model.Title</h1>
+
+            @functions {
+                public string Heading => "Users";
+            }
+            """);
+        workspace.WriteSource(
+            "Pages/Users/Index.cshtml.cs",
+            """
+            namespace Demo.Pages.Users
+            {
+                public sealed class IndexModel
+                {
+                    public Demo.Services.IUserRepository Repository { get; }
+                    public string Title { get; } = "Users";
+                }
+            }
+
+            namespace Demo.Services
+            {
+                public interface IUserRepository
+                {
+                }
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath),
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Equal(3, result.TypeCount);
+        Assert.Contains("class Pages_Users_Index", result.Mermaid);
+        Assert.Contains("<<razor page>>", result.Mermaid);
+        Assert.Contains("+Model: Demo.Pages.Users.IndexModel", result.Mermaid);
+        Assert.Contains("+Repository: Demo.Services.IUserRepository", result.Mermaid);
+        Assert.Contains("+Heading: string", result.Mermaid);
+        Assert.Contains("Pages_Users_Index --> Demo_Pages_Users_IndexModel : Model", result.Mermaid);
+        Assert.Contains("Pages_Users_Index --> Demo_Services_IUserRepository : Repository", result.Mermaid);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WhenSearchFileIsCshtml_AnalyzesRazorPage()
+    {
+        using var workspace = TestWorkspace.Create();
+        var selectedFile = workspace.WriteSource(
+            "Pages/About.cshtml",
+            """
+            @page
+            @model Demo.Pages.AboutModel
+            """);
+        workspace.WriteSource(
+            "Pages/Ignored.cshtml",
+            """
+            @page
+            @model Demo.Pages.IgnoredModel
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, selectedFile, workspace.OutputPath),
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.TypeCount);
+        Assert.Contains("class Pages_About", result.Mermaid);
+        Assert.Contains("+Model: Demo.Pages.AboutModel", result.Mermaid);
+        Assert.DoesNotContain("Pages_Ignored", result.Mermaid);
+    }
+
+    [Fact]
     public async Task GenerateAsync_ReportsProgressThroughCompletion()
     {
         using var workspace = TestWorkspace.Create();

@@ -6,7 +6,8 @@ public enum DiagramTypeKind
     Interface,
     Struct,
     Record,
-    Enum
+    Enum,
+    RazorPage
 }
 
 public enum DiagramMemberKind

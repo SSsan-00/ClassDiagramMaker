@@ -14,6 +14,7 @@ FILES=(
   "src/ClassDiagramMaker.Core/Analysis/DiagramModel.cs"
   "src/ClassDiagramMaker.Core/Analysis/GenerationContracts.cs"
   "src/ClassDiagramMaker.Core/Analysis/MermaidRenderer.cs"
+  "src/ClassDiagramMaker.Core/Analysis/RazorPageCollector.cs"
   "src/ClassDiagramMaker.Core/Analysis/RelationshipBuilder.cs"
   "src/ClassDiagramMaker.Core/Analysis/SyntaxTypeCollector.cs"
   "src/ClassDiagramMaker.Core/Analysis/TypeReferenceCollector.cs"

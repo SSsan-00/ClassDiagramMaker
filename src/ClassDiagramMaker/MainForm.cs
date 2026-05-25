@@ -80,7 +80,7 @@ public sealed class MainForm : Form
             AutoSize = true,
             Dock = DockStyle.Fill,
             ForeColor = SystemColors.GrayText,
-            Text = "検索対象ファイルが空の場合は、検索対象フォルダ配下の .cs ファイルを再帰的に解析します。"
+            Text = "検索対象ファイルが空の場合は、検索対象フォルダ配下の .cs / .cshtml ファイルを再帰的に解析します。"
         };
         panel.Controls.Add(helpLabel, 1, 4);
 
@@ -263,7 +263,7 @@ public sealed class MainForm : Form
         using var dialog = new OpenFileDialog
         {
             Title = "検索対象ファイルを選択",
-            Filter = "C# files (*.cs)|*.cs|All files (*.*)|*.*",
+            Filter = "Supported source files (*.cs;*.cshtml)|*.cs;*.cshtml|C# files (*.cs)|*.cs|Razor files (*.cshtml)|*.cshtml|All files (*.*)|*.*",
             CheckFileExists = true,
             Multiselect = false
         };

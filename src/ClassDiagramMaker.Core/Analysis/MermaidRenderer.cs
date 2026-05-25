@@ -71,6 +71,7 @@ internal static class MermaidRenderer
             DiagramTypeKind.Struct => "struct",
             DiagramTypeKind.Record => "record",
             DiagramTypeKind.Enum => "enumeration",
+            DiagramTypeKind.RazorPage => "razor page",
             _ => string.Empty
         };
 

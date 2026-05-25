@@ -7,6 +7,12 @@ namespace ClassDiagramMaker.Analysis;
 
 public sealed class ClassDiagramService
 {
+    private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".cs",
+        ".cshtml"
+    };
+
     public async Task<GenerationResult> GenerateAsync(
         GenerationRequest request,
         IProgress<GenerationProgress> progress,
@@ -24,12 +30,12 @@ public sealed class ClassDiagramService
         var files = ResolveFiles(options);
         if (files.Count == 0)
         {
-            throw new InvalidOperationException("No C# files were found for the requested input.");
+            throw new InvalidOperationException("No supported source files were found for the requested input.");
         }
 
         progress.Report(new GenerationProgress(
             "Parsing",
-            $"Found {files.Count} C# file(s).",
+            $"Found {files.Count} source file(s).",
             10,
             0,
             files.Count));
@@ -42,10 +48,16 @@ public sealed class ClassDiagramService
 
             var file = files[index];
             var text = await File.ReadAllTextAsync(file, cancellationToken);
-            var tree = CSharpSyntaxTree.ParseText(text, path: file, cancellationToken: cancellationToken);
-            var root = (CompilationUnitSyntax)await tree.GetRootAsync(cancellationToken);
-
-            collectedTypes.AddRange(SyntaxTypeCollector.Collect(root, file));
+            if (IsRazorPageFile(file))
+            {
+                collectedTypes.AddRange(RazorPageCollector.Collect(text, file, options.ProjectFolder));
+            }
+            else
+            {
+                var tree = CSharpSyntaxTree.ParseText(text, path: file, cancellationToken: cancellationToken);
+                var root = (CompilationUnitSyntax)await tree.GetRootAsync(cancellationToken);
+                collectedTypes.AddRange(SyntaxTypeCollector.Collect(root, file));
+            }
 
             var percent = 10 + (int)Math.Round(((index + 1) / (double)files.Count) * 55);
             progress.Report(new GenerationProgress(
@@ -134,9 +146,9 @@ public sealed class ClassDiagramService
                 throw new FileNotFoundException($"Search file does not exist: {searchFile}", searchFile);
             }
 
-            if (!string.Equals(Path.GetExtension(searchFile), ".cs", StringComparison.OrdinalIgnoreCase))
+            if (!IsSupportedSourceFile(searchFile))
             {
-                throw new ArgumentException("Search file must be a .cs file.");
+                throw new ArgumentException("Search file must be a .cs, .cshtml.cs, or .cshtml file.");
             }
 
             searchFolder = Path.GetDirectoryName(searchFile) ?? projectFolder;
@@ -164,10 +176,20 @@ public sealed class ClassDiagramService
             return new List<string> { request.SearchFile };
         }
 
-        return Directory.EnumerateFiles(request.SearchFolder, "*.cs", SearchOption.AllDirectories)
-            .Where(path => !IsIgnoredPath(path))
+        return Directory.EnumerateFiles(request.SearchFolder, "*", SearchOption.AllDirectories)
+            .Where(path => IsSupportedSourceFile(path) && !IsIgnoredPath(path))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static bool IsSupportedSourceFile(string path)
+    {
+        return SupportedExtensions.Contains(Path.GetExtension(path));
+    }
+
+    private static bool IsRazorPageFile(string path)
+    {
+        return string.Equals(Path.GetExtension(path), ".cshtml", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsIgnoredPath(string path)

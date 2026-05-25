@@ -25,7 +25,9 @@ Fill in the WinForms screen:
 - Search file, optional
 - Output path for the generated `.mmd` file
 
-When the search file is empty, the tool recursively analyzes `.cs` files under the search folder. The GUI shows parsing and rendering progress while the Mermaid file is generated.
+When the search file is empty, the tool recursively analyzes `.cs`, `.cshtml.cs`, and `.cshtml` files under the search folder. The GUI shows parsing and rendering progress while the Mermaid file is generated.
+
+Razor `.cshtml` files are represented as Razor page nodes. The analyzer includes `@model`, `@inject`, and members declared in `@functions` / `@code` blocks. `.cshtml.cs` code-behind files are parsed as normal C# source.
 
 ## Tests
 
@@ -47,6 +49,11 @@ classDiagram
         where T : class, new()
         #{static readonly} CacheKey: string
         +{abstract} Create~TArg~(arg: TArg): T where TArg : struct
+    }
+    class Pages_Users_Index {
+        <<razor page>>
+        +Model: Demo.Pages.Users.IndexModel
+        +Repository: Demo.Services.IUserRepository
     }
     UserRepository <|.. UserService
     UserService --> UserRepository : repository
