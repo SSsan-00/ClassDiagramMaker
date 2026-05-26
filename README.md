@@ -13,7 +13,9 @@ GUI は Windows 向けの WinForms アプリケーションです。
 
 ## 実行方法
 
-```bash
+PowerShell では次のように実行します。
+
+```powershell
 dotnet restore src/ClassDiagramMaker/ClassDiagramMaker.csproj
 dotnet run --project src/ClassDiagramMaker/ClassDiagramMaker.csproj
 ```
@@ -70,6 +72,12 @@ PowerShell で Windows 用の単一 exe を生成できます。
 
 ```text
 artifacts/win-x64-single-file/ClassDiagramMaker.exe
+```
+
+起動に失敗した場合は、エラーダイアログを表示し、次のログファイルに詳細を書き込みます。
+
+```text
+%LOCALAPPDATA%\ClassDiagramMaker\ClassDiagramMaker.error.log
 ```
 
 別の Windows runtime 向けに publish する場合は、`-Runtime` を指定します。
@@ -133,8 +141,30 @@ classDiagram
 
 リポジトリをダウンロードできないユーザー向けに、単一ファイルの bootstrap スクリプトを用意しています。
 
+Windows / PowerShell では次のコマンドを使います。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\bootstrap\ClassDiagramMaker.bootstrap.ps1 .\ClassDiagramMaker
+```
+
+PowerShell の実行ポリシーでブロックされない環境では、次のように直接実行できます。
+
+```powershell
+.\bootstrap\ClassDiagramMaker.bootstrap.ps1 .\ClassDiagramMaker
+```
+
+macOS / Linux など `sh` が使える環境では、次のコマンドでも生成できます。
+
 ```bash
-./bootstrap/ClassDiagramMaker.bootstrap.sh ./ClassDiagramMaker
+sh ./bootstrap/ClassDiagramMaker.bootstrap.sh ./ClassDiagramMaker
+```
+
+生成後、Windows では次のように起動または publish できます。
+
+```powershell
+cd .\ClassDiagramMaker
+dotnet run --project .\src\ClassDiagramMaker\ClassDiagramMaker.csproj
+.\tools\publish-single-exe.ps1
 ```
 
 このスクリプトはアプリ本体と Core のソースツリーをローカルに再作成します。xUnit のテストコードは意図的に含めていません。
