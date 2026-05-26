@@ -11,6 +11,7 @@ internal static partial class RazorPageCollector
         var fullName = GetPageFullName(sourceFile, projectFolder);
         var namespaceName = GetPageNamespace(fullName);
         var members = new List<DiagramMember>();
+        var dependencies = CollectMarkupDependencies(source);
 
         var modelType = FindModelType(source);
         if (!string.IsNullOrWhiteSpace(modelType))
@@ -38,7 +39,8 @@ internal static partial class RazorPageCollector
                     .DistinctBy(member => $"{member.Kind}:{member.Signature}")
                     .OrderBy(member => member.Kind)
                     .ThenBy(member => member.Name, StringComparer.Ordinal)
-                    .ToArray()
+                    .ToArray(),
+                Dependencies = dependencies
             }
         };
     }
@@ -86,6 +88,121 @@ internal static partial class RazorPageCollector
                 }
             }
         }
+    }
+
+    private static IReadOnlyList<DiagramDependency> CollectMarkupDependencies(string source)
+    {
+        var dependencies = new List<DiagramDependency>();
+
+        dependencies.AddRange(CustomTagPattern()
+            .Matches(source)
+            .Select(match => CreateDependency(
+                EnsureSuffix(ToPascalName(match.Groups["name"].Value), "TagHelper"),
+                "tag helper")));
+
+        dependencies.AddRange(ViewComponentStringPattern()
+            .Matches(source)
+            .Select(match => CreateDependency(
+                EnsureSuffix(ToPascalName(match.Groups["name"].Value), "ViewComponent"),
+                "view component")));
+
+        dependencies.AddRange(ViewComponentTypePattern()
+            .Matches(source)
+            .Select(match => CreateDependency(
+                EnsureSuffix(ToPascalName(match.Groups["type"].Value), "ViewComponent"),
+                "view component")));
+
+        dependencies.AddRange(ViewComponentTagPattern()
+            .Matches(source)
+            .Select(match => CreateDependency(
+                EnsureSuffix(ToPascalName(match.Groups["name"].Value), "ViewComponent"),
+                "view component")));
+
+        dependencies.AddRange(PartialCallPattern()
+            .Matches(source)
+            .Select(match => CreateDependency(
+                ToPascalName(match.Groups["name"].Value),
+                "partial")));
+
+        dependencies.AddRange(PartialTagPattern()
+            .Matches(source)
+            .Select(match => CreateDependency(
+                ToPascalName(match.Groups["name"].Value),
+                "partial")));
+
+        return dependencies
+            .Where(dependency => !string.IsNullOrWhiteSpace(dependency.TypeName))
+            .DistinctBy(dependency => $"{dependency.TypeName}:{dependency.Label}")
+            .ToArray();
+    }
+
+    private static DiagramDependency CreateDependency(string typeName, string label)
+    {
+        return new DiagramDependency
+        {
+            TypeName = typeName,
+            Label = label
+        };
+    }
+
+    private static string EnsureSuffix(string typeName, string suffix)
+    {
+        if (string.IsNullOrWhiteSpace(typeName) || typeName.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return typeName;
+        }
+
+        return $"{typeName}{suffix}";
+    }
+
+    private static string ToPascalName(string value)
+    {
+        var normalized = value
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .LastOrDefault() ?? string.Empty;
+
+        if (normalized.EndsWith(".cshtml", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[..^".cshtml".Length];
+        }
+
+        normalized = normalized.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        if (normalized.Contains('.', StringComparison.Ordinal))
+        {
+            normalized = normalized.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? normalized;
+        }
+
+        if (!normalized.Contains('-', StringComparison.Ordinal) &&
+            !normalized.Contains(' ', StringComparison.Ordinal) &&
+            !normalized.Contains('_', StringComparison.Ordinal))
+        {
+            return normalized;
+        }
+
+        var keepLeadingUnderscore = normalized.StartsWith('_');
+        var converted = string.Concat(NameTokenPattern()
+            .Matches(normalized)
+            .Select(match => match.Value)
+            .Where(token => token.Length > 0)
+            .Select(ToPascalToken));
+
+        return keepLeadingUnderscore ? $"_{converted}" : converted;
+    }
+
+    private static string ToPascalToken(string token)
+    {
+        return token.Length switch
+        {
+            0 => string.Empty,
+            1 => token.ToUpperInvariant(),
+            _ => char.ToUpperInvariant(token[0]) + token[1..]
+        };
     }
 
     private static IEnumerable<string> ExtractDirectiveBlocks(string source, string directive)
@@ -172,6 +289,27 @@ internal static partial class RazorPageCollector
 
     [GeneratedRegex(@"^\s*@inject\s+(?<type>.+?)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*$", RegexOptions.Multiline)]
     private static partial Regex InjectDirectivePattern();
+
+    [GeneratedRegex(@"<\s*(?<name>[a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex CustomTagPattern();
+
+    [GeneratedRegex(@"Component\s*\.\s*InvokeAsync\s*\(\s*""(?<name>[^""]+)""")]
+    private static partial Regex ViewComponentStringPattern();
+
+    [GeneratedRegex(@"Component\s*\.\s*InvokeAsync\s*\(\s*typeof\s*\(\s*(?<type>[A-Za-z_][A-Za-z0-9_\.]*)\s*\)")]
+    private static partial Regex ViewComponentTypePattern();
+
+    [GeneratedRegex(@"<\s*vc\s*:\s*(?<name>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ViewComponentTagPattern();
+
+    [GeneratedRegex(@"(?:Html\s*\.\s*)?(?:PartialAsync|RenderPartialAsync)\s*\(\s*""(?<name>[^""]+)""")]
+    private static partial Regex PartialCallPattern();
+
+    [GeneratedRegex(@"<\s*partial\b[^>]*\bname\s*=\s*[""'](?<name>[^""']+)[""']", RegexOptions.IgnoreCase)]
+    private static partial Regex PartialTagPattern();
+
+    [GeneratedRegex(@"[A-Za-z0-9]+")]
+    private static partial Regex NameTokenPattern();
 
     [GeneratedRegex(@"[^A-Za-z0-9_\.]")]
     private static partial Regex InvalidIdentifierCharacterPattern();

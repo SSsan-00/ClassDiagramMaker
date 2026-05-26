@@ -489,6 +489,285 @@ public sealed class ClassDiagramServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_CollectsDependenciesFromMethodBodiesAliasesAndUsingStatic()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "UserService.cs",
+            """
+            using RepoAlias = Demo.Repositories.UserRepository;
+            using static Demo.Helpers.StaticHelper;
+
+            namespace Demo.Services;
+
+            public sealed class UserService
+            {
+                public UserDto Run(System.IServiceProvider services)
+                {
+                    RepoAlias repository = new RepoAlias();
+                    var dto = (UserDto)repository.Load();
+                    var audit = repository.LoadAudit();
+                    if (dto is ActiveUserDto active)
+                    {
+                        Touch(active);
+                    }
+
+                    var fromService = services.GetRequiredService<IUserRepository>();
+                    Touch(audit);
+                    return fromService.Create(dto);
+                }
+
+                public object FindAudit()
+                {
+                    RepoAlias repository = new RepoAlias();
+                    return repository.LoadAudit();
+                }
+            }
+
+            public static class ServiceProviderExtensions
+            {
+                public static T GetRequiredService<T>(this System.IServiceProvider services) => default!;
+            }
+            """);
+        workspace.WriteSource(
+            "Dependencies.cs",
+            """
+            namespace Demo.Repositories
+            {
+                public sealed class UserRepository
+                {
+                    public object Load() => new();
+
+                    public AuditLog LoadAudit() => new();
+                }
+
+                public sealed class AuditLog
+                {
+                }
+            }
+
+            namespace Demo.Services
+            {
+                public interface IUserRepository
+                {
+                    UserDto Create(UserDto dto);
+                }
+
+                public class UserDto
+                {
+                }
+
+                public sealed class ActiveUserDto : UserDto
+                {
+                }
+            }
+
+            namespace Demo.Helpers
+            {
+                public static class StaticHelper
+                {
+                    public static void Touch(object value)
+                    {
+                    }
+                }
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath),
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Contains("Demo_Services_UserService ..> Demo_Repositories_UserRepository : Run", result.Mermaid);
+        Assert.Contains("Demo_Services_UserService ..> Demo_Services_UserDto : Run", result.Mermaid);
+        Assert.Contains("Demo_Services_UserService ..> Demo_Services_ActiveUserDto : Run", result.Mermaid);
+        Assert.Contains("Demo_Services_UserService ..> Demo_Services_IUserRepository : Run", result.Mermaid);
+        Assert.Contains("Demo_Services_UserService ..> Demo_Repositories_AuditLog : Run", result.Mermaid);
+        Assert.Contains("Demo_Services_UserService ..> Demo_Repositories_AuditLog : FindAudit", result.Mermaid);
+        Assert.Contains("Demo_Services_UserService ..> Demo_Helpers_StaticHelper : Run", result.Mermaid);
+        Assert.Contains("Demo_Services_UserService ..> Demo_Helpers_StaticHelper : using static", result.Mermaid);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_CollectsDependenciesFromAttributesConstraintsAndGenericBaseArguments()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Controller.cs",
+            """
+            namespace Demo;
+
+            [ServiceFilter(typeof(AuditFilter))]
+            public sealed class UserController<TValidator> : BaseController<UserDto>
+                where TValidator : IValidator<UserDto>
+            {
+                [Inject]
+                public IUserRepository Repository { get; }
+            }
+
+            public abstract class BaseController<T>
+            {
+            }
+
+            public sealed class UserDto
+            {
+            }
+
+            public interface IValidator<T>
+            {
+            }
+
+            public interface IUserRepository
+            {
+            }
+
+            public sealed class AuditFilter
+            {
+            }
+
+            public sealed class ServiceFilterAttribute : System.Attribute
+            {
+                public ServiceFilterAttribute(System.Type type)
+                {
+                }
+            }
+
+            public sealed class InjectAttribute : System.Attribute
+            {
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath),
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Contains("Demo_BaseController_T <|-- Demo_UserController_TValidator", result.Mermaid);
+        Assert.Contains("Demo_UserController_TValidator ..> Demo_UserDto : base", result.Mermaid);
+        Assert.Contains("Demo_UserController_TValidator ..> Demo_IValidator_T : where TValidator", result.Mermaid);
+        Assert.Contains("Demo_UserController_TValidator ..> Demo_UserDto : where TValidator", result.Mermaid);
+        Assert.Contains("Demo_UserController_TValidator ..> Demo_AuditFilter : attribute", result.Mermaid);
+        Assert.Contains("Demo_UserController_TValidator ..> Demo_ServiceFilterAttribute : attribute", result.Mermaid);
+        Assert.Contains("Demo_UserController_TValidator --> Demo_IUserRepository : Repository", result.Mermaid);
+        Assert.Contains("Demo_UserController_TValidator --> Demo_InjectAttribute : Repository", result.Mermaid);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_CollectsDelegateAndClassPrimaryConstructorDependencies()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Worker.cs",
+            """
+            namespace Demo;
+
+            public sealed class Worker(UserRepository repository, IClock clock)
+            {
+                public UserDto Run() => repository.Load(clock.Now);
+            }
+
+            public delegate UserDto UserMapper(UserEntity entity);
+
+            public sealed class UserRepository
+            {
+                public UserDto Load(System.DateTime now) => new();
+            }
+
+            public interface IClock
+            {
+                System.DateTime Now { get; }
+            }
+
+            public sealed class UserDto
+            {
+            }
+
+            public sealed class UserEntity
+            {
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath),
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Equal(6, result.TypeCount);
+        Assert.Contains("class Demo_UserMapper", result.Mermaid);
+        Assert.Contains("<<delegate>>", result.Mermaid);
+        Assert.Contains("+Invoke(entity: UserEntity): UserDto", result.Mermaid);
+        Assert.Contains("Demo_Worker ..> Demo_UserRepository : Worker", result.Mermaid);
+        Assert.Contains("Demo_Worker ..> Demo_IClock : Worker", result.Mermaid);
+        Assert.Contains("Demo_Worker ..> Demo_UserDto : Run", result.Mermaid);
+        Assert.Contains("Demo_UserMapper ..> Demo_UserDto : Invoke", result.Mermaid);
+        Assert.Contains("Demo_UserMapper ..> Demo_UserEntity : Invoke", result.Mermaid);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_CollectsRazorMarkupReferencesForTagHelpersViewComponentsAndPartials()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Pages/Users/Index.cshtml",
+            """
+            @page
+            @model Demo.Pages.Users.IndexModel
+            @addTagHelper *, Demo
+
+            <user-card user="Model.User"></user-card>
+            @await Component.InvokeAsync("UserSummary", new { id = Model.User.Id })
+            @await Html.PartialAsync("_UserRow", Model.User)
+            """);
+        workspace.WriteSource(
+            "Pages/Users/Index.cshtml.cs",
+            """
+            namespace Demo.Pages.Users
+            {
+                public sealed class IndexModel
+                {
+                    public Demo.Models.UserDto User { get; }
+                }
+
+                public sealed class _UserRow
+                {
+                }
+            }
+
+            namespace Demo.Models
+            {
+                public sealed class UserDto
+                {
+                    public int Id { get; }
+                }
+            }
+
+            namespace Demo.TagHelpers
+            {
+                public sealed class UserCardTagHelper
+                {
+                }
+            }
+
+            namespace Demo.ViewComponents
+            {
+                public sealed class UserSummaryViewComponent
+                {
+                }
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath),
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Contains("Pages_Users_Index --> Demo_Pages_Users_IndexModel : Model", result.Mermaid);
+        Assert.Contains("Pages_Users_Index ..> Demo_TagHelpers_UserCardTagHelper : tag helper", result.Mermaid);
+        Assert.Contains("Pages_Users_Index ..> Demo_ViewComponents_UserSummaryViewComponent : view component", result.Mermaid);
+        Assert.Contains("Pages_Users_Index ..> Demo_Pages_Users_UserRow : partial", result.Mermaid);
+    }
+
+    [Fact]
     public async Task GenerateAsync_WhenDisplayModeIsTypeOnly_HidesMembersButKeepsTypeMetadata()
     {
         using var workspace = TestWorkspace.Create();
@@ -631,6 +910,83 @@ public sealed class ClassDiagramServiceTests
         Assert.DoesNotContain(unexpectedToken1, result.Mermaid);
         Assert.DoesNotContain(unexpectedToken2, result.Mermaid);
         Assert.DoesNotContain(unexpectedToken3, result.Mermaid);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WhenDependencyFilterIsOff_HidesSemanticAndMarkupDependencies()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Dashboard.cs",
+            """
+            using static Demo.StaticHelper;
+
+            namespace Demo;
+
+            [ServiceFilter(typeof(AuditFilter))]
+            public sealed class Dashboard
+            {
+                public DashboardDto Create()
+                {
+                    Touch();
+                    return new DashboardDto();
+                }
+            }
+
+            public sealed class DashboardDto
+            {
+            }
+
+            public static class StaticHelper
+            {
+                public static void Touch()
+                {
+                }
+            }
+
+            public sealed class ServiceFilterAttribute : System.Attribute
+            {
+                public ServiceFilterAttribute(System.Type type)
+                {
+                }
+            }
+
+            public sealed class AuditFilter
+            {
+            }
+            """);
+        workspace.WriteSource(
+            "Pages/Index.cshtml",
+            """
+            @page
+            <user-card></user-card>
+            @await Component.InvokeAsync("Dashboard")
+            """);
+        workspace.WriteSource(
+            "Pages/Index.cshtml.cs",
+            """
+            namespace Demo;
+
+            public sealed class UserCardTagHelper
+            {
+            }
+
+            public sealed class DashboardViewComponent
+            {
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath)
+            {
+                Options = new DiagramGenerationOptions(IncludeDependency: false)
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Contains("class Demo_Dashboard", result.Mermaid);
+        Assert.Contains("class Pages_Index", result.Mermaid);
+        Assert.DoesNotContain("..>", result.Mermaid);
     }
 
     [Fact]

@@ -78,6 +78,7 @@ Razor の `.cshtml` ファイルは Razor ページのノードとして表現�
 - `@model`
 - `@inject`
 - `@functions` / `@code` ブロックに定義されたメンバー
+- マークアップ内の tag helper、view component、partial view 参照
 
 `.cshtml.cs` の code-behind ファイルは通常の C# ソースとして解析します。
 
@@ -148,6 +149,18 @@ diagram.Demo.Models.mmd
 namespace 分割では C# の namespace ごとに型をまとめます。フォルダ分割では、対象プロジェクトフォルダから見たソースファイルの配置ごとに型をまとめます。
 
 分割された図では、同じ分割ファイル内にある型同士の関係だけを出力します。任意で生成できる `*.all.mmd` には全体図を保持します。
+
+## 解析できる依存関係
+
+C# ソースは Roslyn の AST と SemanticModel を使って解析します。主な取得対象は次の通りです。
+
+- 継承、interface 実装、フィールド、プロパティ、イベント、メソッド、コンストラクタ、インデクサ
+- `abstract`、`sealed`、`static`、`readonly` などの修飾子
+- generic 型引数、`where T : class` などの generic 制約
+- 属性、`typeof(...)`、base 型の generic 引数
+- メソッド本体内の `new`、cast、pattern matching、`var` 推論型、static メンバー呼び出し、generic メソッド型引数、呼び出し先の戻り値型
+- `using static` と using alias 経由で参照した型
+- delegate と class primary constructor
 
 ## 出力形式
 
@@ -278,6 +291,7 @@ public sealed class ClassDiagramService
             files.Count));
 
         var collectedTypes = new List<DiagramType>();
+        var csharpDocuments = new List<CSharpDocument>();
 
         for (var index = 0; index < files.Count; index++)
         {
@@ -291,9 +305,12 @@ public sealed class ClassDiagramService
             }
             else
             {
-                var tree = CSharpSyntaxTree.ParseText(text, path: file, cancellationToken: cancellationToken);
-                var root = (CompilationUnitSyntax)await tree.GetRootAsync(cancellationToken);
-                collectedTypes.AddRange(SyntaxTypeCollector.Collect(root, file));
+                var tree = CSharpSyntaxTree.ParseText(
+                    text,
+                    CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest),
+                    path: file,
+                    cancellationToken: cancellationToken);
+                csharpDocuments.Add(new CSharpDocument(file, tree));
             }
 
             var percent = 10 + (int)Math.Round(((index + 1) / (double)files.Count) * 55);
@@ -303,6 +320,23 @@ public sealed class ClassDiagramService
                 percent,
                 index + 1,
                 files.Count));
+        }
+
+        if (csharpDocuments.Count > 0)
+        {
+            var compilation = CSharpCompilation.Create(
+                "ClassDiagramMaker.Analysis.Workspace",
+                csharpDocuments.Select(document => document.Tree),
+                GetMetadataReferences(),
+                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+            foreach (var document in csharpDocuments)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var root = (CompilationUnitSyntax)await document.Tree.GetRootAsync(cancellationToken);
+                var semanticModel = compilation.GetSemanticModel(document.Tree);
+                collectedTypes.AddRange(SyntaxTypeCollector.Collect(root, document.File, semanticModel));
+            }
         }
 
         progress.Report(new GenerationProgress(
@@ -517,6 +551,9 @@ public sealed class ClassDiagramService
                     Modifiers = group.SelectMany(type => type.Modifiers).Distinct(StringComparer.Ordinal).OrderBy(value => value).ToArray(),
                     TypeParameterConstraints = group.SelectMany(type => type.TypeParameterConstraints).Distinct(StringComparer.Ordinal).ToArray(),
                     BaseTypes = group.SelectMany(type => type.BaseTypes).Distinct(StringComparer.Ordinal).ToArray(),
+                    Dependencies = group.SelectMany(type => type.Dependencies)
+                        .DistinctBy(dependency => $"{NormalizeDependencyName(dependency.TypeName)}:{dependency.Label}")
+                        .ToArray(),
                     Members = group.SelectMany(type => type.Members)
                         .DistinctBy(member => $"{member.Kind}:{member.Signature}")
                         .OrderBy(member => member.Kind)
@@ -771,11 +808,41 @@ public sealed class ClassDiagramService
         }
     }
 
+    private static IReadOnlyList<MetadataReference> GetMetadataReferences()
+    {
+        var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
+        if (!string.IsNullOrWhiteSpace(trustedPlatformAssemblies))
+        {
+            return trustedPlatformAssemblies
+                .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(File.Exists)
+                .Select(path => MetadataReference.CreateFromFile(path))
+                .ToArray();
+        }
+
+        return new[]
+        {
+            MetadataReference.CreateFromFile(typeof(object).Assembly.Location)
+        };
+    }
+
+    private static string NormalizeDependencyName(string typeName)
+    {
+        var value = typeName
+            .Replace("global::", string.Empty, StringComparison.Ordinal)
+            .Replace("?", string.Empty, StringComparison.Ordinal)
+            .Trim();
+        var genericStart = value.IndexOf('<', StringComparison.Ordinal);
+        return genericStart >= 0 ? value[..genericStart] : value;
+    }
+
     private sealed record NormalizedGenerationRequest(
         string ProjectFolder,
         string SearchFolder,
         string? SearchFile,
         string OutputPath);
+
+    private sealed record CSharpDocument(string File, SyntaxTree Tree);
 
     private sealed record GeneratedOutput(
         string PrimaryPath,
@@ -803,7 +870,8 @@ public enum DiagramTypeKind
     Struct,
     Record,
     Enum,
-    RazorPage
+    RazorPage,
+    Delegate
 }
 
 public enum DiagramMemberKind
@@ -840,6 +908,7 @@ public sealed record DiagramType
     public IReadOnlyList<string> TypeParameterConstraints { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> BaseTypes { get; init; } = Array.Empty<string>();
     public IReadOnlyList<DiagramMember> Members { get; init; } = Array.Empty<DiagramMember>();
+    public IReadOnlyList<DiagramDependency> Dependencies { get; init; } = Array.Empty<DiagramDependency>();
 }
 
 public sealed record DiagramMember
@@ -860,6 +929,12 @@ public sealed record DiagramRelationship
     public required DiagramRelationshipKind Kind { get; init; }
     public required string FromTypeId { get; init; }
     public required string ToTypeId { get; init; }
+    public string? Label { get; init; }
+}
+
+public sealed record DiagramDependency
+{
+    public required string TypeName { get; init; }
     public string? Label { get; init; }
 }
 
@@ -1006,6 +1081,7 @@ internal static class MermaidRenderer
             DiagramTypeKind.Record => "record",
             DiagramTypeKind.Enum => "enumeration",
             DiagramTypeKind.RazorPage => "razor page",
+            DiagramTypeKind.Delegate => "delegate",
             _ => string.Empty
         };
 
@@ -1065,6 +1141,7 @@ internal static partial class RazorPageCollector
         var fullName = GetPageFullName(sourceFile, projectFolder);
         var namespaceName = GetPageNamespace(fullName);
         var members = new List<DiagramMember>();
+        var dependencies = CollectMarkupDependencies(source);
 
         var modelType = FindModelType(source);
         if (!string.IsNullOrWhiteSpace(modelType))
@@ -1092,7 +1169,8 @@ internal static partial class RazorPageCollector
                     .DistinctBy(member => $"{member.Kind}:{member.Signature}")
                     .OrderBy(member => member.Kind)
                     .ThenBy(member => member.Name, StringComparer.Ordinal)
-                    .ToArray()
+                    .ToArray(),
+                Dependencies = dependencies
             }
         };
     }
@@ -1140,6 +1218,121 @@ internal static partial class RazorPageCollector
                 }
             }
         }
+    }
+
+    private static IReadOnlyList<DiagramDependency> CollectMarkupDependencies(string source)
+    {
+        var dependencies = new List<DiagramDependency>();
+
+        dependencies.AddRange(CustomTagPattern()
+            .Matches(source)
+            .Select(match => CreateDependency(
+                EnsureSuffix(ToPascalName(match.Groups["name"].Value), "TagHelper"),
+                "tag helper")));
+
+        dependencies.AddRange(ViewComponentStringPattern()
+            .Matches(source)
+            .Select(match => CreateDependency(
+                EnsureSuffix(ToPascalName(match.Groups["name"].Value), "ViewComponent"),
+                "view component")));
+
+        dependencies.AddRange(ViewComponentTypePattern()
+            .Matches(source)
+            .Select(match => CreateDependency(
+                EnsureSuffix(ToPascalName(match.Groups["type"].Value), "ViewComponent"),
+                "view component")));
+
+        dependencies.AddRange(ViewComponentTagPattern()
+            .Matches(source)
+            .Select(match => CreateDependency(
+                EnsureSuffix(ToPascalName(match.Groups["name"].Value), "ViewComponent"),
+                "view component")));
+
+        dependencies.AddRange(PartialCallPattern()
+            .Matches(source)
+            .Select(match => CreateDependency(
+                ToPascalName(match.Groups["name"].Value),
+                "partial")));
+
+        dependencies.AddRange(PartialTagPattern()
+            .Matches(source)
+            .Select(match => CreateDependency(
+                ToPascalName(match.Groups["name"].Value),
+                "partial")));
+
+        return dependencies
+            .Where(dependency => !string.IsNullOrWhiteSpace(dependency.TypeName))
+            .DistinctBy(dependency => $"{dependency.TypeName}:{dependency.Label}")
+            .ToArray();
+    }
+
+    private static DiagramDependency CreateDependency(string typeName, string label)
+    {
+        return new DiagramDependency
+        {
+            TypeName = typeName,
+            Label = label
+        };
+    }
+
+    private static string EnsureSuffix(string typeName, string suffix)
+    {
+        if (string.IsNullOrWhiteSpace(typeName) || typeName.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return typeName;
+        }
+
+        return $"{typeName}{suffix}";
+    }
+
+    private static string ToPascalName(string value)
+    {
+        var normalized = value
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .LastOrDefault() ?? string.Empty;
+
+        if (normalized.EndsWith(".cshtml", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[..^".cshtml".Length];
+        }
+
+        normalized = normalized.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        if (normalized.Contains('.', StringComparison.Ordinal))
+        {
+            normalized = normalized.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? normalized;
+        }
+
+        if (!normalized.Contains('-', StringComparison.Ordinal) &&
+            !normalized.Contains(' ', StringComparison.Ordinal) &&
+            !normalized.Contains('_', StringComparison.Ordinal))
+        {
+            return normalized;
+        }
+
+        var keepLeadingUnderscore = normalized.StartsWith('_');
+        var converted = string.Concat(NameTokenPattern()
+            .Matches(normalized)
+            .Select(match => match.Value)
+            .Where(token => token.Length > 0)
+            .Select(ToPascalToken));
+
+        return keepLeadingUnderscore ? $"_{converted}" : converted;
+    }
+
+    private static string ToPascalToken(string token)
+    {
+        return token.Length switch
+        {
+            0 => string.Empty,
+            1 => token.ToUpperInvariant(),
+            _ => char.ToUpperInvariant(token[0]) + token[1..]
+        };
     }
 
     private static IEnumerable<string> ExtractDirectiveBlocks(string source, string directive)
@@ -1227,6 +1420,27 @@ internal static partial class RazorPageCollector
     [GeneratedRegex(@"^\s*@inject\s+(?<type>.+?)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*$", RegexOptions.Multiline)]
     private static partial Regex InjectDirectivePattern();
 
+    [GeneratedRegex(@"<\s*(?<name>[a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex CustomTagPattern();
+
+    [GeneratedRegex(@"Component\s*\.\s*InvokeAsync\s*\(\s*""(?<name>[^""]+)""")]
+    private static partial Regex ViewComponentStringPattern();
+
+    [GeneratedRegex(@"Component\s*\.\s*InvokeAsync\s*\(\s*typeof\s*\(\s*(?<type>[A-Za-z_][A-Za-z0-9_\.]*)\s*\)")]
+    private static partial Regex ViewComponentTypePattern();
+
+    [GeneratedRegex(@"<\s*vc\s*:\s*(?<name>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ViewComponentTagPattern();
+
+    [GeneratedRegex(@"(?:Html\s*\.\s*)?(?:PartialAsync|RenderPartialAsync)\s*\(\s*""(?<name>[^""]+)""")]
+    private static partial Regex PartialCallPattern();
+
+    [GeneratedRegex(@"<\s*partial\b[^>]*\bname\s*=\s*[""'](?<name>[^""']+)[""']", RegexOptions.IgnoreCase)]
+    private static partial Regex PartialTagPattern();
+
+    [GeneratedRegex(@"[A-Za-z0-9]+")]
+    private static partial Regex NameTokenPattern();
+
     [GeneratedRegex(@"[^A-Za-z0-9_\.]")]
     private static partial Regex InvalidIdentifierCharacterPattern();
 }
@@ -1300,6 +1514,23 @@ internal static class RelationshipBuilder
                         Label = member.Name
                     });
                 }
+            }
+
+            foreach (var dependency in type.Dependencies)
+            {
+                var target = index.Resolve(dependency.TypeName, type);
+                if (target is null || target.Id == type.Id || !ShouldInclude(DiagramRelationshipKind.Dependency, options))
+                {
+                    continue;
+                }
+
+                relationships.Add(new DiagramRelationship
+                {
+                    Kind = DiagramRelationshipKind.Dependency,
+                    FromTypeId = type.Id,
+                    ToTypeId = target.Id,
+                    Label = dependency.Label
+                });
             }
         }
 
@@ -1413,15 +1644,34 @@ namespace ClassDiagramMaker.Analysis;
 
 internal static class SyntaxTypeCollector
 {
-    public static IReadOnlyList<DiagramType> Collect(CompilationUnitSyntax root, string sourceFile)
+    public static IReadOnlyList<DiagramType> Collect(
+        CompilationUnitSyntax root,
+        string sourceFile,
+        SemanticModel? semanticModel = null)
     {
         return root.DescendantNodes()
-            .OfType<BaseTypeDeclarationSyntax>()
-            .Select(declaration => CreateType(declaration, sourceFile))
+            .Where(node => node is BaseTypeDeclarationSyntax or DelegateDeclarationSyntax)
+            .Select(declaration => CreateType(declaration, sourceFile, semanticModel))
             .ToArray();
     }
 
-    private static DiagramType CreateType(BaseTypeDeclarationSyntax declaration, string sourceFile)
+    private static DiagramType CreateType(
+        SyntaxNode declaration,
+        string sourceFile,
+        SemanticModel? semanticModel)
+    {
+        return declaration switch
+        {
+            BaseTypeDeclarationSyntax typeDeclaration => CreateType(typeDeclaration, sourceFile, semanticModel),
+            DelegateDeclarationSyntax delegateDeclaration => CreateDelegateType(delegateDeclaration, sourceFile, semanticModel),
+            _ => throw new ArgumentOutOfRangeException(nameof(declaration), declaration, null)
+        };
+    }
+
+    private static DiagramType CreateType(
+        BaseTypeDeclarationSyntax declaration,
+        string sourceFile,
+        SemanticModel? semanticModel)
     {
         var typeParameters = GetTypeParameters(declaration);
         var simpleName = declaration.Identifier.ValueText;
@@ -1453,7 +1703,67 @@ internal static class SyntaxTypeCollector
             TypeParameters = typeParameters,
             TypeParameterConstraints = GetTypeParameterConstraints(declaration),
             BaseTypes = GetBaseTypes(declaration),
-            Members = GetMembers(declaration)
+            Members = GetMembers(declaration, semanticModel),
+            Dependencies = GetTypeDependencies(declaration, semanticModel)
+        };
+    }
+
+    private static DiagramType CreateDelegateType(
+        DelegateDeclarationSyntax declaration,
+        string sourceFile,
+        SemanticModel? semanticModel)
+    {
+        var typeParameters = declaration.TypeParameterList is null
+            ? Array.Empty<string>()
+            : declaration.TypeParameterList.Parameters.Select(parameter => parameter.Identifier.ValueText).ToArray();
+        var simpleName = declaration.Identifier.ValueText;
+        var displayName = typeParameters.Length == 0
+            ? simpleName
+            : $"{simpleName}<{string.Join(", ", typeParameters)}>";
+        var namespaceName = GetNamespace(declaration);
+        var fullName = string.IsNullOrWhiteSpace(namespaceName)
+            ? displayName
+            : $"{namespaceName}.{displayName}";
+        var parameters = FormatParameters(declaration.ParameterList.Parameters);
+        var constraints = FormatConstraintClauses(declaration.ConstraintClauses);
+        var signature = $"Invoke({parameters}): {declaration.ReturnType}";
+        if (constraints.Count > 0)
+        {
+            signature = $"{signature} {string.Join(" ", constraints)}";
+        }
+
+        var references = TypeReferenceCollector.Collect(declaration.ReturnType, semanticModel)
+            .Concat(declaration.ParameterList.Parameters.SelectMany(parameter => TypeReferenceCollector.Collect(parameter.Type, semanticModel)))
+            .Concat(CollectConstraintReferences(declaration.ConstraintClauses, semanticModel))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        return new DiagramType
+        {
+            Id = MermaidNames.ToId(fullName),
+            SimpleName = simpleName,
+            DisplayName = displayName,
+            FullName = fullName,
+            Namespace = namespaceName,
+            SourceFile = sourceFile,
+            Kind = DiagramTypeKind.Delegate,
+            Accessibility = GetAccessibility(declaration.Modifiers, isTypeDeclaration: true),
+            Modifiers = GetNonAccessibilityModifiers(declaration.Modifiers),
+            TypeParameters = typeParameters,
+            TypeParameterConstraints = constraints,
+            Members = new[]
+            {
+                new DiagramMember
+                {
+                    Kind = DiagramMemberKind.Method,
+                    Name = "Invoke",
+                    Type = declaration.ReturnType.ToString(),
+                    Visibility = "+",
+                    Signature = $"+{signature}",
+                    ReferencedTypes = references
+                }
+            },
+            Dependencies = CollectAttributeDependencies(declaration.AttributeLists, semanticModel, "attribute")
         };
     }
 
@@ -1508,7 +1818,40 @@ internal static class SyntaxTypeCollector
             : Array.Empty<string>();
     }
 
-    private static IReadOnlyList<DiagramMember> GetMembers(BaseTypeDeclarationSyntax declaration)
+    private static IReadOnlyList<DiagramDependency> GetTypeDependencies(
+        BaseTypeDeclarationSyntax declaration,
+        SemanticModel? semanticModel)
+    {
+        var dependencies = new List<DiagramDependency>();
+        dependencies.AddRange(CollectAttributeDependencies(declaration.AttributeLists, semanticModel, "attribute"));
+
+        if (declaration is not TypeDeclarationSyntax typeDeclaration)
+        {
+            return DistinctDependencies(dependencies);
+        }
+
+        dependencies.AddRange(CollectUsingStaticDependencies(typeDeclaration, semanticModel));
+        dependencies.AddRange(CollectConstraintDependencies(typeDeclaration.ConstraintClauses, semanticModel));
+
+        if (typeDeclaration.BaseList is not null)
+        {
+            foreach (var baseType in typeDeclaration.BaseList.Types)
+            {
+                dependencies.AddRange(CollectBaseTypeArgumentReferences(baseType.Type, semanticModel)
+                    .Select(reference => new DiagramDependency
+                    {
+                        TypeName = reference,
+                        Label = "base"
+                    }));
+            }
+        }
+
+        return DistinctDependencies(dependencies);
+    }
+
+    private static IReadOnlyList<DiagramMember> GetMembers(
+        BaseTypeDeclarationSyntax declaration,
+        SemanticModel? semanticModel)
     {
         if (declaration is EnumDeclarationSyntax enumDeclaration)
         {
@@ -1530,32 +1873,33 @@ internal static class SyntaxTypeCollector
         }
 
         var members = new List<DiagramMember>();
-        members.AddRange(CreateRecordPrimaryConstructorMembers(typeDeclaration));
+        members.AddRange(CreateRecordPrimaryConstructorMembers(typeDeclaration, semanticModel));
+        members.AddRange(CreateClassPrimaryConstructorMembers(typeDeclaration, semanticModel));
 
         foreach (var member in typeDeclaration.Members)
         {
             switch (member)
             {
                 case FieldDeclarationSyntax field:
-                    members.AddRange(CreateFieldMembers(field, typeDeclaration));
+                    members.AddRange(CreateFieldMembers(field, typeDeclaration, semanticModel));
                     break;
                 case PropertyDeclarationSyntax property:
-                    members.Add(CreatePropertyMember(property, typeDeclaration));
+                    members.Add(CreatePropertyMember(property, typeDeclaration, semanticModel));
                     break;
                 case MethodDeclarationSyntax method:
-                    members.Add(CreateMethodMember(method, typeDeclaration));
+                    members.Add(CreateMethodMember(method, typeDeclaration, semanticModel));
                     break;
                 case ConstructorDeclarationSyntax constructor:
-                    members.Add(CreateConstructorMember(constructor));
+                    members.Add(CreateConstructorMember(constructor, semanticModel));
                     break;
                 case EventDeclarationSyntax eventDeclaration:
-                    members.Add(CreateEventMember(eventDeclaration, typeDeclaration));
+                    members.Add(CreateEventMember(eventDeclaration, typeDeclaration, semanticModel));
                     break;
                 case EventFieldDeclarationSyntax eventField:
-                    members.AddRange(CreateEventFieldMembers(eventField, typeDeclaration));
+                    members.AddRange(CreateEventFieldMembers(eventField, typeDeclaration, semanticModel));
                     break;
                 case IndexerDeclarationSyntax indexer:
-                    members.Add(CreateIndexerMember(indexer, typeDeclaration));
+                    members.Add(CreateIndexerMember(indexer, typeDeclaration, semanticModel));
                     break;
             }
         }
@@ -1563,7 +1907,9 @@ internal static class SyntaxTypeCollector
         return members;
     }
 
-    private static IEnumerable<DiagramMember> CreateRecordPrimaryConstructorMembers(TypeDeclarationSyntax typeDeclaration)
+    private static IEnumerable<DiagramMember> CreateRecordPrimaryConstructorMembers(
+        TypeDeclarationSyntax typeDeclaration,
+        SemanticModel? semanticModel)
     {
         if (typeDeclaration is not RecordDeclarationSyntax { ParameterList: { } parameterList })
         {
@@ -1581,14 +1927,41 @@ internal static class SyntaxTypeCollector
                 Type = type,
                 Visibility = "+",
                 Signature = $"+{name}: {type}",
-                ReferencedTypes = TypeReferenceCollector.Collect(parameter.Type)
+                ReferencedTypes = TypeReferenceCollector.Collect(parameter.Type, semanticModel)
             };
         });
     }
 
+    private static IEnumerable<DiagramMember> CreateClassPrimaryConstructorMembers(
+        TypeDeclarationSyntax typeDeclaration,
+        SemanticModel? semanticModel)
+    {
+        if (typeDeclaration is RecordDeclarationSyntax || typeDeclaration.ParameterList is null)
+        {
+            return Array.Empty<DiagramMember>();
+        }
+
+        return new[]
+        {
+            new DiagramMember
+            {
+                Kind = DiagramMemberKind.Constructor,
+                Name = typeDeclaration.Identifier.ValueText,
+                Type = string.Empty,
+                Visibility = GetVisibilitySymbol(typeDeclaration.Modifiers),
+                Signature = CreateMemberSignature(typeDeclaration.Modifiers, $"{typeDeclaration.Identifier.ValueText}({FormatParameters(typeDeclaration.ParameterList.Parameters)})"),
+                ReferencedTypes = typeDeclaration.ParameterList.Parameters
+                    .SelectMany(parameter => TypeReferenceCollector.Collect(parameter.Type, semanticModel))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray()
+            }
+        };
+    }
+
     private static IEnumerable<DiagramMember> CreateFieldMembers(
         FieldDeclarationSyntax field,
-        TypeDeclarationSyntax containingType)
+        TypeDeclarationSyntax containingType,
+        SemanticModel? semanticModel)
     {
         var type = field.Declaration.Type.ToString();
         var defaultPublic = IsInterfaceMember(containingType);
@@ -1603,14 +1976,19 @@ internal static class SyntaxTypeCollector
                 Signature = CreateMemberSignature(field.Modifiers, $"{variable.Identifier.ValueText}: {type}", defaultPublic),
                 IsStatic = HasModifier(field.Modifiers, SyntaxKind.StaticKeyword),
                 Modifiers = GetNonAccessibilityModifiers(field.Modifiers),
-                ReferencedTypes = TypeReferenceCollector.Collect(field.Declaration.Type)
+                ReferencedTypes = TypeReferenceCollector.Collect(field.Declaration.Type, semanticModel)
+                    .Concat(CollectAttributeReferences(field.AttributeLists, semanticModel))
+                    .Concat(CollectMemberBodyReferences(field, semanticModel))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray()
             };
         }
     }
 
     private static DiagramMember CreatePropertyMember(
         PropertyDeclarationSyntax property,
-        TypeDeclarationSyntax containingType)
+        TypeDeclarationSyntax containingType,
+        SemanticModel? semanticModel)
     {
         var type = property.Type.ToString();
         var defaultPublic = IsInterfaceMember(containingType);
@@ -1623,13 +2001,18 @@ internal static class SyntaxTypeCollector
             Signature = CreateMemberSignature(property.Modifiers, $"{property.Identifier.ValueText}: {type}", defaultPublic),
             IsStatic = HasModifier(property.Modifiers, SyntaxKind.StaticKeyword),
             Modifiers = GetNonAccessibilityModifiers(property.Modifiers),
-            ReferencedTypes = TypeReferenceCollector.Collect(property.Type)
+            ReferencedTypes = TypeReferenceCollector.Collect(property.Type, semanticModel)
+                .Concat(CollectAttributeReferences(property.AttributeLists, semanticModel))
+                .Concat(CollectMemberBodyReferences(property, semanticModel))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray()
         };
     }
 
     private static DiagramMember CreateMethodMember(
         MethodDeclarationSyntax method,
-        TypeDeclarationSyntax containingType)
+        TypeDeclarationSyntax containingType,
+        SemanticModel? semanticModel)
     {
         var returnType = method.ReturnType.ToString();
         var defaultPublic = IsInterfaceMember(containingType);
@@ -1638,8 +2021,11 @@ internal static class SyntaxTypeCollector
             : $"<{string.Join(", ", method.TypeParameterList.Parameters.Select(parameter => parameter.Identifier.ValueText))}>";
         var parameters = FormatParameters(method.ParameterList.Parameters);
         var constraints = FormatConstraintClauses(method.ConstraintClauses);
-        var references = TypeReferenceCollector.Collect(method.ReturnType)
-            .Concat(method.ParameterList.Parameters.SelectMany(parameter => TypeReferenceCollector.Collect(parameter.Type)))
+        var references = TypeReferenceCollector.Collect(method.ReturnType, semanticModel)
+            .Concat(method.ParameterList.Parameters.SelectMany(parameter => TypeReferenceCollector.Collect(parameter.Type, semanticModel)))
+            .Concat(CollectConstraintReferences(method.ConstraintClauses, semanticModel))
+            .Concat(CollectAttributeReferences(method.AttributeLists, semanticModel))
+            .Concat(CollectMemberBodyReferences(method, semanticModel))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
         var coreSignature = $"{method.Identifier.ValueText}{typeParameters}({parameters}): {returnType}";
@@ -1662,11 +2048,15 @@ internal static class SyntaxTypeCollector
         };
     }
 
-    private static DiagramMember CreateConstructorMember(ConstructorDeclarationSyntax constructor)
+    private static DiagramMember CreateConstructorMember(
+        ConstructorDeclarationSyntax constructor,
+        SemanticModel? semanticModel)
     {
         var parameters = FormatParameters(constructor.ParameterList.Parameters);
         var references = constructor.ParameterList.Parameters
-            .SelectMany(parameter => TypeReferenceCollector.Collect(parameter.Type))
+            .SelectMany(parameter => TypeReferenceCollector.Collect(parameter.Type, semanticModel))
+            .Concat(CollectAttributeReferences(constructor.AttributeLists, semanticModel))
+            .Concat(CollectMemberBodyReferences(constructor, semanticModel))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
@@ -1685,7 +2075,8 @@ internal static class SyntaxTypeCollector
 
     private static DiagramMember CreateEventMember(
         EventDeclarationSyntax eventDeclaration,
-        TypeDeclarationSyntax containingType)
+        TypeDeclarationSyntax containingType,
+        SemanticModel? semanticModel)
     {
         var type = eventDeclaration.Type.ToString();
         var defaultPublic = IsInterfaceMember(containingType);
@@ -1698,13 +2089,17 @@ internal static class SyntaxTypeCollector
             Signature = CreateMemberSignature(eventDeclaration.Modifiers, $"{eventDeclaration.Identifier.ValueText}: {type}", defaultPublic),
             IsStatic = HasModifier(eventDeclaration.Modifiers, SyntaxKind.StaticKeyword),
             Modifiers = GetNonAccessibilityModifiers(eventDeclaration.Modifiers),
-            ReferencedTypes = TypeReferenceCollector.Collect(eventDeclaration.Type)
+            ReferencedTypes = TypeReferenceCollector.Collect(eventDeclaration.Type, semanticModel)
+                .Concat(CollectAttributeReferences(eventDeclaration.AttributeLists, semanticModel))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray()
         };
     }
 
     private static IEnumerable<DiagramMember> CreateEventFieldMembers(
         EventFieldDeclarationSyntax eventField,
-        TypeDeclarationSyntax containingType)
+        TypeDeclarationSyntax containingType,
+        SemanticModel? semanticModel)
     {
         var type = eventField.Declaration.Type.ToString();
         var defaultPublic = IsInterfaceMember(containingType);
@@ -1719,20 +2114,26 @@ internal static class SyntaxTypeCollector
                 Signature = CreateMemberSignature(eventField.Modifiers, $"{variable.Identifier.ValueText}: {type}", defaultPublic),
                 IsStatic = HasModifier(eventField.Modifiers, SyntaxKind.StaticKeyword),
                 Modifiers = GetNonAccessibilityModifiers(eventField.Modifiers),
-                ReferencedTypes = TypeReferenceCollector.Collect(eventField.Declaration.Type)
+                ReferencedTypes = TypeReferenceCollector.Collect(eventField.Declaration.Type, semanticModel)
+                    .Concat(CollectAttributeReferences(eventField.AttributeLists, semanticModel))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray()
             };
         }
     }
 
     private static DiagramMember CreateIndexerMember(
         IndexerDeclarationSyntax indexer,
-        TypeDeclarationSyntax containingType)
+        TypeDeclarationSyntax containingType,
+        SemanticModel? semanticModel)
     {
         var type = indexer.Type.ToString();
         var defaultPublic = IsInterfaceMember(containingType);
         var parameters = FormatParameters(indexer.ParameterList.Parameters);
-        var references = TypeReferenceCollector.Collect(indexer.Type)
-            .Concat(indexer.ParameterList.Parameters.SelectMany(parameter => TypeReferenceCollector.Collect(parameter.Type)))
+        var references = TypeReferenceCollector.Collect(indexer.Type, semanticModel)
+            .Concat(indexer.ParameterList.Parameters.SelectMany(parameter => TypeReferenceCollector.Collect(parameter.Type, semanticModel)))
+            .Concat(CollectAttributeReferences(indexer.AttributeLists, semanticModel))
+            .Concat(CollectMemberBodyReferences(indexer, semanticModel))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
@@ -1747,6 +2148,226 @@ internal static class SyntaxTypeCollector
             Modifiers = GetNonAccessibilityModifiers(indexer.Modifiers),
             ReferencedTypes = references
         };
+    }
+
+    private static IReadOnlyList<DiagramDependency> CollectUsingStaticDependencies(
+        SyntaxNode declaration,
+        SemanticModel? semanticModel)
+    {
+        var root = declaration.SyntaxTree.GetCompilationUnitRoot();
+        return root.Usings
+            .Where(usingDirective => !usingDirective.StaticKeyword.IsKind(SyntaxKind.None) && usingDirective.Name is not null)
+            .SelectMany(usingDirective => TypeReferenceCollector.Collect(usingDirective.Name, semanticModel))
+            .Select(reference => new DiagramDependency
+            {
+                TypeName = reference,
+                Label = "using static"
+            })
+            .ToArray();
+    }
+
+    private static IReadOnlyList<DiagramDependency> CollectConstraintDependencies(
+        SyntaxList<TypeParameterConstraintClauseSyntax> clauses,
+        SemanticModel? semanticModel)
+    {
+        return clauses
+            .SelectMany(clause => CollectConstraintReferences(clause, semanticModel)
+                .Select(reference => new DiagramDependency
+                {
+                    TypeName = reference,
+                    Label = $"where {clause.Name}"
+                }))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> CollectConstraintReferences(
+        SyntaxList<TypeParameterConstraintClauseSyntax> clauses,
+        SemanticModel? semanticModel)
+    {
+        return clauses
+            .SelectMany(clause => CollectConstraintReferences(clause, semanticModel))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> CollectConstraintReferences(
+        TypeParameterConstraintClauseSyntax clause,
+        SemanticModel? semanticModel)
+    {
+        return clause.Constraints
+            .OfType<TypeConstraintSyntax>()
+            .SelectMany(constraint => TypeReferenceCollector.Collect(constraint.Type, semanticModel));
+    }
+
+    private static IReadOnlyList<string> CollectBaseTypeArgumentReferences(
+        TypeSyntax baseType,
+        SemanticModel? semanticModel)
+    {
+        var primary = TypeReferenceCollector.GetPrimaryTypeName(baseType, semanticModel);
+        return TypeReferenceCollector.Collect(baseType, semanticModel)
+            .Where(reference => !string.Equals(NormalizeTypeName(reference), NormalizeTypeName(primary), StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<DiagramDependency> CollectAttributeDependencies(
+        SyntaxList<AttributeListSyntax> attributeLists,
+        SemanticModel? semanticModel,
+        string label)
+    {
+        return CollectAttributeReferences(attributeLists, semanticModel)
+            .Select(reference => new DiagramDependency
+            {
+                TypeName = reference,
+                Label = label
+            })
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> CollectAttributeReferences(
+        SyntaxList<AttributeListSyntax> attributeLists,
+        SemanticModel? semanticModel)
+    {
+        var references = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var attribute in attributeLists.SelectMany(list => list.Attributes))
+        {
+            if (semanticModel is not null)
+            {
+                AddSymbolReference(semanticModel.GetSymbolInfo(attribute).Symbol, references);
+            }
+
+            foreach (var typeOfExpression in attribute.DescendantNodes().OfType<TypeOfExpressionSyntax>())
+            {
+                AddReferences(TypeReferenceCollector.Collect(typeOfExpression.Type, semanticModel), references);
+            }
+        }
+
+        return references.ToArray();
+    }
+
+    private static IReadOnlyList<string> CollectMemberBodyReferences(
+        MemberDeclarationSyntax member,
+        SemanticModel? semanticModel)
+    {
+        var references = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var typeSyntax in member.DescendantNodes().OfType<TypeSyntax>())
+        {
+            AddReferences(TypeReferenceCollector.Collect(typeSyntax, semanticModel), references);
+        }
+
+        if (semanticModel is null)
+        {
+            return references.ToArray();
+        }
+
+        foreach (var invocation in member.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        {
+            AddSymbolReference(semanticModel.GetSymbolInfo(invocation).Symbol, references);
+        }
+
+        foreach (var creation in member.DescendantNodes().OfType<ObjectCreationExpressionSyntax>())
+        {
+            AddTypeReference(semanticModel.GetTypeInfo(creation).Type, references);
+        }
+
+        foreach (var creation in member.DescendantNodes().OfType<ImplicitObjectCreationExpressionSyntax>())
+        {
+            AddTypeReference(semanticModel.GetTypeInfo(creation).Type, references);
+        }
+
+        foreach (var memberAccess in member.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
+        {
+            AddSymbolReference(semanticModel.GetSymbolInfo(memberAccess).Symbol, references);
+        }
+
+        foreach (var identifier in member.DescendantNodes().OfType<IdentifierNameSyntax>())
+        {
+            var symbol = semanticModel.GetSymbolInfo(identifier).Symbol;
+            if (symbol is IMethodSymbol { IsStatic: true } or IPropertySymbol { IsStatic: true } or IFieldSymbol { IsStatic: true } or IEventSymbol { IsStatic: true })
+            {
+                AddSymbolReference(symbol, references);
+            }
+        }
+
+        return references.ToArray();
+    }
+
+    private static void AddReferences(IEnumerable<string> values, HashSet<string> references)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                references.Add(value);
+            }
+        }
+    }
+
+    private static void AddSymbolReference(ISymbol? symbol, HashSet<string> references)
+    {
+        switch (symbol)
+        {
+            case IMethodSymbol method:
+                AddTypeReference(method.ContainingType, references);
+                AddTypeReference(method.ReturnType, references);
+                AddReferences(SymbolTypeReferences.ToReferenceNames(method.Parameters.Select(parameter => parameter.Type)), references);
+                AddReferences(SymbolTypeReferences.ToReferenceNames(method.TypeArguments), references);
+                break;
+            case IPropertySymbol property:
+                AddTypeReference(property.ContainingType, references);
+                AddTypeReference(property.Type, references);
+                break;
+            case IFieldSymbol field:
+                AddTypeReference(field.ContainingType, references);
+                AddTypeReference(field.Type, references);
+                break;
+            case IEventSymbol eventSymbol:
+                AddTypeReference(eventSymbol.ContainingType, references);
+                AddTypeReference(eventSymbol.Type, references);
+                break;
+            case ILocalSymbol local:
+                AddTypeReference(local.Type, references);
+                break;
+            case IParameterSymbol parameter:
+                AddTypeReference(parameter.Type, references);
+                break;
+            case INamedTypeSymbol namedType:
+                AddTypeReference(namedType, references);
+                break;
+        }
+    }
+
+    private static void AddTypeReference(ITypeSymbol? symbol, HashSet<string> references)
+    {
+        var reference = SymbolTypeReferences.ToReferenceName(symbol);
+        if (!string.IsNullOrWhiteSpace(reference))
+        {
+            references.Add(reference);
+        }
+    }
+
+    private static IReadOnlyList<DiagramDependency> DistinctDependencies(IEnumerable<DiagramDependency> dependencies)
+    {
+        return dependencies
+            .Where(dependency => !string.IsNullOrWhiteSpace(dependency.TypeName))
+            .DistinctBy(dependency => $"{NormalizeTypeName(dependency.TypeName)}:{dependency.Label}")
+            .ToArray();
+    }
+
+    private static string NormalizeTypeName(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return string.Empty;
+        }
+
+        var value = typeName
+            .Replace("global::", string.Empty, StringComparison.Ordinal)
+            .Replace("?", string.Empty, StringComparison.Ordinal)
+            .Trim();
+        var genericStart = value.IndexOf('<', StringComparison.Ordinal);
+        return genericStart >= 0 ? value[..genericStart] : value;
     }
 
     private static string FormatParameters(SeparatedSyntaxList<ParameterSyntax> parameters)
@@ -1861,12 +2482,13 @@ __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/TypeReferenceCollector.cs")"
 cat > "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/TypeReferenceCollector.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis;
 
 namespace ClassDiagramMaker.Analysis;
 
 internal static class TypeReferenceCollector
 {
-    public static IReadOnlyList<string> Collect(TypeSyntax? type)
+    public static IReadOnlyList<string> Collect(TypeSyntax? type, SemanticModel? semanticModel = null)
     {
         if (type is null)
         {
@@ -1874,58 +2496,137 @@ internal static class TypeReferenceCollector
         }
 
         var references = new HashSet<string>(StringComparer.Ordinal);
-        Add(type, references);
+        Add(type, references, semanticModel);
         return references.ToArray();
     }
 
-    private static void Add(TypeSyntax type, HashSet<string> references)
+    public static string? GetPrimaryTypeName(TypeSyntax? type, SemanticModel? semanticModel = null)
     {
+        if (type is null)
+        {
+            return null;
+        }
+
+        return TryGetSemanticTypeName(type, semanticModel) ?? type switch
+        {
+            IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+            GenericNameSyntax generic => generic.Identifier.ValueText,
+            QualifiedNameSyntax qualified => qualified.ToString(),
+            AliasQualifiedNameSyntax aliasQualified => aliasQualified.Name.ToString(),
+            NullableTypeSyntax nullable => GetPrimaryTypeName(nullable.ElementType, semanticModel),
+            ArrayTypeSyntax array => GetPrimaryTypeName(array.ElementType, semanticModel),
+            PointerTypeSyntax pointer => GetPrimaryTypeName(pointer.ElementType, semanticModel),
+            _ => null
+        };
+    }
+
+    private static void Add(TypeSyntax type, HashSet<string> references, SemanticModel? semanticModel)
+    {
+        var semanticTypeName = TryGetSemanticTypeName(type, semanticModel);
+        if (!string.IsNullOrWhiteSpace(semanticTypeName))
+        {
+            references.Add(semanticTypeName);
+        }
+
         switch (type)
         {
             case PredefinedTypeSyntax:
                 return;
 
             case IdentifierNameSyntax identifier:
-                references.Add(identifier.Identifier.ValueText);
+                if (semanticTypeName is null)
+                {
+                    references.Add(identifier.Identifier.ValueText);
+                }
                 return;
 
             case GenericNameSyntax generic:
-                references.Add(generic.Identifier.ValueText);
+                if (semanticTypeName is null)
+                {
+                    references.Add(generic.Identifier.ValueText);
+                }
                 foreach (var argument in generic.TypeArgumentList.Arguments)
                 {
-                    Add(argument, references);
+                    Add(argument, references, semanticModel);
                 }
                 return;
 
             case QualifiedNameSyntax qualified:
-                references.Add(qualified.ToString());
-                Add(qualified.Right, references);
+                if (semanticTypeName is null)
+                {
+                    references.Add(qualified.ToString());
+                }
+                Add(qualified.Right, references, semanticModel);
                 return;
 
             case AliasQualifiedNameSyntax aliasQualified:
-                references.Add(aliasQualified.Name.ToString());
-                Add(aliasQualified.Name, references);
+                if (semanticTypeName is null)
+                {
+                    references.Add(aliasQualified.Name.ToString());
+                }
+                Add(aliasQualified.Name, references, semanticModel);
                 return;
 
             case NullableTypeSyntax nullable:
-                Add(nullable.ElementType, references);
+                Add(nullable.ElementType, references, semanticModel);
                 return;
 
             case ArrayTypeSyntax array:
-                Add(array.ElementType, references);
+                Add(array.ElementType, references, semanticModel);
                 return;
 
             case PointerTypeSyntax pointer:
-                Add(pointer.ElementType, references);
+                Add(pointer.ElementType, references, semanticModel);
                 return;
 
             case TupleTypeSyntax tuple:
                 foreach (var element in tuple.Elements)
                 {
-                    Add(element.Type, references);
+                    Add(element.Type, references, semanticModel);
                 }
                 return;
         }
+    }
+
+    private static string? TryGetSemanticTypeName(TypeSyntax type, SemanticModel? semanticModel)
+    {
+        if (semanticModel is null)
+        {
+            return null;
+        }
+
+        var typeInfo = semanticModel.GetTypeInfo(type);
+        var symbol = typeInfo.Type ?? typeInfo.ConvertedType;
+        return SymbolTypeReferences.ToReferenceName(symbol);
+    }
+}
+
+internal static class SymbolTypeReferences
+{
+    private static readonly SymbolDisplayFormat ReferenceFormat = new(
+        globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Included,
+        typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
+        genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters,
+        miscellaneousOptions: SymbolDisplayMiscellaneousOptions.UseSpecialTypes);
+
+    public static string? ToReferenceName(ITypeSymbol? symbol)
+    {
+        return symbol switch
+        {
+            null => null,
+            IArrayTypeSymbol array => ToReferenceName(array.ElementType),
+            IPointerTypeSymbol pointer => ToReferenceName(pointer.PointedAtType),
+            INamedTypeSymbol named when named.SpecialType != SpecialType.None => null,
+            INamedTypeSymbol named => named.ToDisplayString(ReferenceFormat),
+            _ => null
+        };
+    }
+
+    public static IEnumerable<string> ToReferenceNames(IEnumerable<ITypeSymbol> symbols)
+    {
+        return symbols
+            .Select(ToReferenceName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))!;
     }
 }
 

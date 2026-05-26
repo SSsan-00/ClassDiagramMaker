@@ -7,7 +7,8 @@ public enum DiagramTypeKind
     Struct,
     Record,
     Enum,
-    RazorPage
+    RazorPage,
+    Delegate
 }
 
 public enum DiagramMemberKind
@@ -44,6 +45,7 @@ public sealed record DiagramType
     public IReadOnlyList<string> TypeParameterConstraints { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> BaseTypes { get; init; } = Array.Empty<string>();
     public IReadOnlyList<DiagramMember> Members { get; init; } = Array.Empty<DiagramMember>();
+    public IReadOnlyList<DiagramDependency> Dependencies { get; init; } = Array.Empty<DiagramDependency>();
 }
 
 public sealed record DiagramMember
@@ -64,5 +66,11 @@ public sealed record DiagramRelationship
     public required DiagramRelationshipKind Kind { get; init; }
     public required string FromTypeId { get; init; }
     public required string ToTypeId { get; init; }
+    public string? Label { get; init; }
+}
+
+public sealed record DiagramDependency
+{
+    public required string TypeName { get; init; }
     public string? Label { get; init; }
 }

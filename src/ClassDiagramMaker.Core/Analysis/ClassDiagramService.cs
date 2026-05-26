@@ -41,6 +41,7 @@ public sealed class ClassDiagramService
             files.Count));
 
         var collectedTypes = new List<DiagramType>();
+        var csharpDocuments = new List<CSharpDocument>();
 
         for (var index = 0; index < files.Count; index++)
         {
@@ -54,9 +55,12 @@ public sealed class ClassDiagramService
             }
             else
             {
-                var tree = CSharpSyntaxTree.ParseText(text, path: file, cancellationToken: cancellationToken);
-                var root = (CompilationUnitSyntax)await tree.GetRootAsync(cancellationToken);
-                collectedTypes.AddRange(SyntaxTypeCollector.Collect(root, file));
+                var tree = CSharpSyntaxTree.ParseText(
+                    text,
+                    CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest),
+                    path: file,
+                    cancellationToken: cancellationToken);
+                csharpDocuments.Add(new CSharpDocument(file, tree));
             }
 
             var percent = 10 + (int)Math.Round(((index + 1) / (double)files.Count) * 55);
@@ -66,6 +70,23 @@ public sealed class ClassDiagramService
                 percent,
                 index + 1,
                 files.Count));
+        }
+
+        if (csharpDocuments.Count > 0)
+        {
+            var compilation = CSharpCompilation.Create(
+                "ClassDiagramMaker.Analysis.Workspace",
+                csharpDocuments.Select(document => document.Tree),
+                GetMetadataReferences(),
+                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+            foreach (var document in csharpDocuments)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var root = (CompilationUnitSyntax)await document.Tree.GetRootAsync(cancellationToken);
+                var semanticModel = compilation.GetSemanticModel(document.Tree);
+                collectedTypes.AddRange(SyntaxTypeCollector.Collect(root, document.File, semanticModel));
+            }
         }
 
         progress.Report(new GenerationProgress(
@@ -280,6 +301,9 @@ public sealed class ClassDiagramService
                     Modifiers = group.SelectMany(type => type.Modifiers).Distinct(StringComparer.Ordinal).OrderBy(value => value).ToArray(),
                     TypeParameterConstraints = group.SelectMany(type => type.TypeParameterConstraints).Distinct(StringComparer.Ordinal).ToArray(),
                     BaseTypes = group.SelectMany(type => type.BaseTypes).Distinct(StringComparer.Ordinal).ToArray(),
+                    Dependencies = group.SelectMany(type => type.Dependencies)
+                        .DistinctBy(dependency => $"{NormalizeDependencyName(dependency.TypeName)}:{dependency.Label}")
+                        .ToArray(),
                     Members = group.SelectMany(type => type.Members)
                         .DistinctBy(member => $"{member.Kind}:{member.Signature}")
                         .OrderBy(member => member.Kind)
@@ -534,11 +558,41 @@ public sealed class ClassDiagramService
         }
     }
 
+    private static IReadOnlyList<MetadataReference> GetMetadataReferences()
+    {
+        var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
+        if (!string.IsNullOrWhiteSpace(trustedPlatformAssemblies))
+        {
+            return trustedPlatformAssemblies
+                .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(File.Exists)
+                .Select(path => MetadataReference.CreateFromFile(path))
+                .ToArray();
+        }
+
+        return new[]
+        {
+            MetadataReference.CreateFromFile(typeof(object).Assembly.Location)
+        };
+    }
+
+    private static string NormalizeDependencyName(string typeName)
+    {
+        var value = typeName
+            .Replace("global::", string.Empty, StringComparison.Ordinal)
+            .Replace("?", string.Empty, StringComparison.Ordinal)
+            .Trim();
+        var genericStart = value.IndexOf('<', StringComparison.Ordinal);
+        return genericStart >= 0 ? value[..genericStart] : value;
+    }
+
     private sealed record NormalizedGenerationRequest(
         string ProjectFolder,
         string SearchFolder,
         string? SearchFile,
         string OutputPath);
+
+    private sealed record CSharpDocument(string File, SyntaxTree Tree);
 
     private sealed record GeneratedOutput(
         string PrimaryPath,

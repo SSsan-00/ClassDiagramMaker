@@ -64,6 +64,23 @@ internal static class RelationshipBuilder
                     });
                 }
             }
+
+            foreach (var dependency in type.Dependencies)
+            {
+                var target = index.Resolve(dependency.TypeName, type);
+                if (target is null || target.Id == type.Id || !ShouldInclude(DiagramRelationshipKind.Dependency, options))
+                {
+                    continue;
+                }
+
+                relationships.Add(new DiagramRelationship
+                {
+                    Kind = DiagramRelationshipKind.Dependency,
+                    FromTypeId = type.Id,
+                    ToTypeId = target.Id,
+                    Label = dependency.Label
+                });
+            }
         }
 
         return relationships
