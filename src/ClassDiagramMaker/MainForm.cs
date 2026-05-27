@@ -4,6 +4,10 @@ namespace ClassDiagramMaker;
 
 public sealed class MainForm : Form
 {
+    private const int PreferredLogPanelHeight = 190;
+    private const int PreferredLogPanelMinHeight = 120;
+    private const int PreferredMermaidPanelMinHeight = 220;
+
     private readonly ClassDiagramService _service;
     private readonly TextBox _projectFolderTextBox = new();
     private readonly TextBox _searchFolderTextBox = new();
@@ -351,15 +355,77 @@ public sealed class MainForm : Form
         var split = new SplitContainer
         {
             Dock = DockStyle.Fill,
-            Orientation = Orientation.Horizontal,
-            SplitterDistance = 190,
-            Panel1MinSize = 120,
-            Panel2MinSize = 220
+            Orientation = Orientation.Horizontal
+        };
+        var splitterInitialized = false;
+        var configuringSplitter = false;
+
+        split.HandleCreated += (_, _) =>
+        {
+            configuringSplitter = true;
+            try
+            {
+                splitterInitialized = ConfigureOutputSplit(split, usePreferredDistance: !splitterInitialized) || splitterInitialized;
+            }
+            finally
+            {
+                configuringSplitter = false;
+            }
+        };
+        split.SizeChanged += (_, _) =>
+        {
+            configuringSplitter = true;
+            try
+            {
+                splitterInitialized = ConfigureOutputSplit(split, usePreferredDistance: !splitterInitialized) || splitterInitialized;
+            }
+            finally
+            {
+                configuringSplitter = false;
+            }
+        };
+        split.SplitterMoved += (_, _) =>
+        {
+            if (!configuringSplitter)
+            {
+                splitterInitialized = true;
+            }
         };
 
         split.Panel1.Controls.Add(BuildTextSection("ログ", _logTextBox, readOnly: true));
         split.Panel2.Controls.Add(BuildTextSection("Mermaid", _mermaidTextBox, readOnly: false));
         return split;
+    }
+
+    private static bool ConfigureOutputSplit(SplitContainer split, bool usePreferredDistance)
+    {
+        var availableHeight = split.Height - split.SplitterWidth;
+        if (availableHeight <= 0)
+        {
+            return false;
+        }
+
+        var panel1MinSize = Math.Min(PreferredLogPanelMinHeight, Math.Max(0, availableHeight / 3));
+        var panel2MinSize = Math.Min(PreferredMermaidPanelMinHeight, Math.Max(0, availableHeight - panel1MinSize));
+        var minDistance = panel1MinSize;
+        var maxDistance = availableHeight - panel2MinSize;
+        if (maxDistance < minDistance)
+        {
+            panel2MinSize = Math.Max(0, availableHeight - panel1MinSize);
+            maxDistance = availableHeight - panel2MinSize;
+        }
+
+        split.Panel1MinSize = 0;
+        split.Panel2MinSize = 0;
+
+        var preferredDistance = Math.Min(PreferredLogPanelHeight, availableHeight / 2);
+        var distance = usePreferredDistance
+            ? preferredDistance
+            : split.SplitterDistance;
+        split.SplitterDistance = Math.Clamp(distance, minDistance, maxDistance);
+        split.Panel1MinSize = panel1MinSize;
+        split.Panel2MinSize = panel2MinSize;
+        return usePreferredDistance && preferredDistance >= minDistance && preferredDistance <= maxDistance;
     }
 
     private static Control BuildTextSection(string title, TextBox textBox, bool readOnly)
