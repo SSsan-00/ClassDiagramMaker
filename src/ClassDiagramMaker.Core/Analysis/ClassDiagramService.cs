@@ -27,7 +27,7 @@ public sealed class ClassDiagramService
             0,
             0));
 
-        var files = ResolveFiles(options);
+        var files = ResolveFiles(options, request.Options);
         if (files.Count == 0)
         {
             throw new InvalidOperationException("No supported source files were found for the requested input.");
@@ -106,6 +106,15 @@ public sealed class ClassDiagramService
             files.Count));
 
         var relationships = RelationshipBuilder.Build(types, request.Options);
+        if (!string.IsNullOrWhiteSpace(options.SearchFile) && request.Options.RelatedTypes.Enabled)
+        {
+            types = SelectRelatedTypes(
+                types,
+                relationships,
+                ExpandSelectedSourceFile(options.SearchFile),
+                request.Options.RelatedTypes);
+            relationships = FilterRelationships(relationships, types);
+        }
 
         progress.Report(new GenerationProgress(
             "Rendering",
@@ -141,19 +150,35 @@ public sealed class ClassDiagramService
 
     private static NormalizedGenerationRequest NormalizeRequest(GenerationRequest request)
     {
-        var projectFolder = NormalizePath(request.ProjectFolder);
+        var projectPath = NormalizePath(request.ProjectFolder);
         var searchFolder = NormalizePath(request.SearchFolder);
         var searchFile = NormalizeOptionalPath(request.SearchFile);
         var outputPath = NormalizePath(request.OutputPath);
+        string? projectFile = null;
 
-        if (string.IsNullOrWhiteSpace(projectFolder))
+        if (string.IsNullOrWhiteSpace(projectPath))
         {
-            throw new ArgumentException("Project folder is required.");
+            throw new ArgumentException("Project file is required.");
         }
 
-        if (!Directory.Exists(projectFolder))
+        string projectFolder;
+        if (IsProjectFile(projectPath))
         {
-            throw new DirectoryNotFoundException($"Project folder does not exist: {projectFolder}");
+            if (!File.Exists(projectPath))
+            {
+                throw new FileNotFoundException($"Project file does not exist: {projectPath}", projectPath);
+            }
+
+            projectFile = projectPath;
+            projectFolder = Path.GetDirectoryName(projectPath) ?? string.Empty;
+        }
+        else if (Directory.Exists(projectPath))
+        {
+            projectFolder = projectPath;
+        }
+        else
+        {
+            throw new DirectoryNotFoundException($"Project folder does not exist: {projectPath}");
         }
 
         if (string.IsNullOrWhiteSpace(outputPath))
@@ -179,7 +204,7 @@ public sealed class ClassDiagramService
         {
             if (string.IsNullOrWhiteSpace(searchFolder))
             {
-                throw new ArgumentException("Search folder is required when search file is empty.");
+                searchFolder = projectFolder;
             }
 
             if (!Directory.Exists(searchFolder))
@@ -188,18 +213,35 @@ public sealed class ClassDiagramService
             }
         }
 
-        return new NormalizedGenerationRequest(projectFolder, searchFolder, searchFile, outputPath);
+        return new NormalizedGenerationRequest(projectFolder, projectFile, searchFolder, searchFile, outputPath);
     }
 
-    private static List<string> ResolveFiles(NormalizedGenerationRequest request)
+    private static List<string> ResolveFiles(
+        NormalizedGenerationRequest request,
+        DiagramGenerationOptions options)
     {
         if (!string.IsNullOrWhiteSpace(request.SearchFile))
         {
-            return ExpandSelectedSourceFile(request.SearchFile);
+            var selectedFiles = ExpandSelectedSourceFile(request.SearchFile);
+            return options.RelatedTypes.Enabled
+                ? ResolveProjectScopeFiles(request, selectedFiles)
+                : selectedFiles;
         }
 
         return Directory.EnumerateFiles(request.SearchFolder, "*", SearchOption.AllDirectories)
             .Where(path => IsSupportedSourceFile(path) && !IsIgnoredPath(path))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<string> ResolveProjectScopeFiles(
+        NormalizedGenerationRequest request,
+        IReadOnlyCollection<string> selectedFiles)
+    {
+        return Directory.EnumerateFiles(request.ProjectFolder, "*", SearchOption.AllDirectories)
+            .Where(path => IsSupportedSourceFile(path) && !IsIgnoredPath(path))
+            .Concat(selectedFiles)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -240,6 +282,11 @@ public sealed class ClassDiagramService
     private static bool IsSupportedSourceFile(string path)
     {
         return SupportedExtensions.Contains(Path.GetExtension(path));
+    }
+
+    private static bool IsProjectFile(string path)
+    {
+        return string.Equals(Path.GetExtension(path), ".csproj", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsRazorPageFile(string path)
@@ -340,6 +387,100 @@ public sealed class ClassDiagramService
                 .ToArray(),
             _ => throw new ArgumentOutOfRangeException(nameof(displayMode), displayMode, null)
         };
+    }
+
+    private static List<DiagramType> SelectRelatedTypes(
+        IReadOnlyList<DiagramType> types,
+        IReadOnlyList<DiagramRelationship> relationships,
+        IReadOnlyCollection<string> selectedFiles,
+        RelatedTypeOptions options)
+    {
+        var selectedFileSet = selectedFiles.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var selectedTypeIds = types
+            .Where(type => HasAnySourceFile(type, selectedFileSet))
+            .Select(type => type.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        if (selectedTypeIds.Count == 0)
+        {
+            return new List<DiagramType>();
+        }
+
+        var includedTypeIds = selectedTypeIds.ToHashSet(StringComparer.Ordinal);
+        var adjacency = BuildRelationshipGraph(relationships);
+        var frontier = selectedTypeIds.ToHashSet(StringComparer.Ordinal);
+        var remainingDepth = Math.Max(0, options.Depth);
+
+        while (frontier.Count > 0 && (options.Unlimited || remainingDepth > 0))
+        {
+            var next = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var typeId in frontier)
+            {
+                if (!adjacency.TryGetValue(typeId, out var relatedTypeIds))
+                {
+                    continue;
+                }
+
+                foreach (var relatedTypeId in relatedTypeIds)
+                {
+                    if (includedTypeIds.Add(relatedTypeId))
+                    {
+                        next.Add(relatedTypeId);
+                    }
+                }
+            }
+
+            frontier = next;
+            if (!options.Unlimited)
+            {
+                remainingDepth--;
+            }
+        }
+
+        return types
+            .Where(type => includedTypeIds.Contains(type.Id))
+            .OrderBy(type => type.FullName, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static IReadOnlyList<DiagramRelationship> FilterRelationships(
+        IReadOnlyList<DiagramRelationship> relationships,
+        IReadOnlyList<DiagramType> types)
+    {
+        var typeIds = types.Select(type => type.Id).ToHashSet(StringComparer.Ordinal);
+        return relationships
+            .Where(relationship => typeIds.Contains(relationship.FromTypeId) && typeIds.Contains(relationship.ToTypeId))
+            .ToArray();
+    }
+
+    private static Dictionary<string, HashSet<string>> BuildRelationshipGraph(
+        IReadOnlyList<DiagramRelationship> relationships)
+    {
+        var graph = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var relationship in relationships)
+        {
+            AddEdge(graph, relationship.FromTypeId, relationship.ToTypeId);
+            AddEdge(graph, relationship.ToTypeId, relationship.FromTypeId);
+        }
+
+        return graph;
+    }
+
+    private static void AddEdge(Dictionary<string, HashSet<string>> graph, string fromTypeId, string toTypeId)
+    {
+        if (!graph.TryGetValue(fromTypeId, out var relatedTypeIds))
+        {
+            relatedTypeIds = new HashSet<string>(StringComparer.Ordinal);
+            graph[fromTypeId] = relatedTypeIds;
+        }
+
+        relatedTypeIds.Add(toTypeId);
+    }
+
+    private static bool HasAnySourceFile(DiagramType type, HashSet<string> selectedFiles)
+    {
+        return type.SourceFile
+            .Split(", ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(sourceFile => selectedFiles.Contains(sourceFile));
     }
 
     private static async Task<GeneratedOutput> WriteSingleOutputAsync(
@@ -588,6 +729,7 @@ public sealed class ClassDiagramService
 
     private sealed record NormalizedGenerationRequest(
         string ProjectFolder,
+        string? ProjectFile,
         string SearchFolder,
         string? SearchFile,
         string OutputPath);

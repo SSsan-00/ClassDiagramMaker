@@ -101,6 +101,140 @@ public sealed class ClassDiagramServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_WhenProjectFileIsSpecifiedAndSearchFolderIsEmpty_UsesProjectDirectory()
+    {
+        using var workspace = TestWorkspace.Create();
+        var projectFile = workspace.WriteProjectFile();
+        workspace.WriteSource(
+            "Sample.cs",
+            """
+            namespace Demo;
+
+            public sealed class Sample
+            {
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(projectFile, string.Empty, null, workspace.OutputPath),
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.TypeCount);
+        Assert.Contains("class Demo_Sample", result.Mermaid);
+    }
+
+    [Theory]
+    [InlineData(0, false, false, false)]
+    [InlineData(1, true, false, false)]
+    [InlineData(2, true, true, false)]
+    [InlineData(1, true, true, true)]
+    public async Task GenerateAsync_WhenProjectFileAndSearchFileAreSpecified_IncludesRelatedTypesByDepth(
+        int depth,
+        bool expectDirect,
+        bool expectTransitive,
+        bool unlimited)
+    {
+        using var workspace = TestWorkspace.Create();
+        var projectFile = workspace.WriteProjectFile();
+        var selectedFile = workspace.WriteSource(
+            "Services/UserService.cs",
+            """
+            namespace Demo.Services;
+
+            public sealed class UserService : BaseService, IUserService
+            {
+                private readonly UserRepository repository;
+
+                public UserDto Create(CreateUserCommand command) => repository.Create(command);
+            }
+            """);
+        workspace.WriteSource(
+            "Services/UserRepository.cs",
+            """
+            namespace Demo.Services;
+
+            public sealed class UserRepository
+            {
+                public UserDto Create(Demo.Models.CreateUserCommand command) => new();
+            }
+            """);
+        workspace.WriteSource(
+            "Services/Contracts.cs",
+            """
+            namespace Demo.Services;
+
+            public abstract class BaseService
+            {
+            }
+
+            public interface IUserService
+            {
+            }
+            """);
+        workspace.WriteSource(
+            "Models/CreateUserCommand.cs",
+            """
+            namespace Demo.Models;
+
+            public sealed class CreateUserCommand
+            {
+                public Address Address { get; }
+            }
+            """);
+        workspace.WriteSource(
+            "Models/UserDto.cs",
+            """
+            namespace Demo.Models;
+
+            public sealed class UserDto
+            {
+            }
+            """);
+        workspace.WriteSource(
+            "Models/Address.cs",
+            """
+            namespace Demo.Models;
+
+            public sealed class Address
+            {
+            }
+            """);
+        workspace.WriteSource(
+            "Unrelated.cs",
+            """
+            namespace Demo;
+
+            public sealed class Unrelated
+            {
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(projectFile, workspace.Root, selectedFile, workspace.OutputPath)
+            {
+                Options = new DiagramGenerationOptions
+                {
+                    RelatedTypes = new RelatedTypeOptions(
+                        Enabled: true,
+                        Depth: depth,
+                        Unlimited: unlimited)
+                }
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Contains("class Demo_Services_UserService", result.Mermaid);
+        Assert.Equal(expectDirect, result.Mermaid.Contains("class Demo_Services_UserRepository", StringComparison.Ordinal));
+        Assert.Equal(expectDirect, result.Mermaid.Contains("class Demo_Services_BaseService", StringComparison.Ordinal));
+        Assert.Equal(expectDirect, result.Mermaid.Contains("class Demo_Services_IUserService", StringComparison.Ordinal));
+        Assert.Equal(expectDirect, result.Mermaid.Contains("class Demo_Models_UserDto", StringComparison.Ordinal));
+        Assert.Equal(expectDirect, result.Mermaid.Contains("class Demo_Models_CreateUserCommand", StringComparison.Ordinal));
+        Assert.Equal(expectTransitive, result.Mermaid.Contains("class Demo_Models_Address", StringComparison.Ordinal));
+        Assert.DoesNotContain("Demo_Unrelated", result.Mermaid);
+    }
+
+    [Fact]
     public async Task GenerateAsync_IncludesRazorPagesAndCodeBehind()
     {
         using var workspace = TestWorkspace.Create();
@@ -1271,6 +1405,21 @@ public sealed class ClassDiagramServiceTests
             return Path.Combine(
                 Root,
                 $"{Path.GetFileNameWithoutExtension(OutputPath)}{suffix}");
+        }
+
+        public string WriteProjectFile(string relativePath = "Demo.csproj")
+        {
+            return WriteSource(
+                relativePath,
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net9.0</TargetFramework>
+                    <Nullable>enable</Nullable>
+                    <ImplicitUsings>enable</ImplicitUsings>
+                  </PropertyGroup>
+                </Project>
+                """);
         }
 
         public void Dispose()

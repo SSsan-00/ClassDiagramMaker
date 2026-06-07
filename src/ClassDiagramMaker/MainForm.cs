@@ -18,6 +18,9 @@ public sealed class MainForm : Form
     private readonly CheckBox _includeRealizationCheckBox = new();
     private readonly CheckBox _includeAssociationCheckBox = new();
     private readonly CheckBox _includeDependencyCheckBox = new();
+    private readonly CheckBox _includeRelatedTypesCheckBox = new();
+    private readonly NumericUpDown _relatedDepthNumericUpDown = new();
+    private readonly CheckBox _unlimitedRelatedDepthCheckBox = new();
     private readonly CheckBox _splitOutputCheckBox = new();
     private readonly ComboBox _splitModeComboBox = new();
     private readonly CheckBox _includeSplitOverviewCheckBox = new();
@@ -86,7 +89,7 @@ public sealed class MainForm : Form
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 96));
 
-        AddPathRow(panel, 0, "対象プロジェクト", _projectFolderTextBox, "参照...", BrowseProjectFolder);
+        AddPathRow(panel, 0, "対象プロジェクト", _projectFolderTextBox, "参照...", BrowseProjectFile);
         AddPathRow(panel, 1, "検索対象フォルダ", _searchFolderTextBox, "参照...", BrowseSearchFolder);
         AddPathRow(panel, 2, "検索対象ファイル", _searchFileTextBox, "参照...", BrowseSearchFile);
         AddPathRow(panel, 3, "出力先", _outputPathTextBox, "参照...", BrowseOutputPath);
@@ -96,7 +99,7 @@ public sealed class MainForm : Form
             AutoSize = true,
             Dock = DockStyle.Fill,
             ForeColor = SystemColors.GrayText,
-            Text = "検索対象ファイルが空の場合は再帰解析します。Razor は .cshtml と .cshtml.cs をペアで解析します。"
+            Text = "対象プロジェクトは .csproj を選択します。検索対象ファイルが空の場合は再帰解析します。"
         };
         panel.Controls.Add(helpLabel, 1, 4);
 
@@ -138,11 +141,11 @@ public sealed class MainForm : Form
             Dock = DockStyle.Fill,
             AutoSize = true,
             ColumnCount = 2,
-            RowCount = 5
+            RowCount = 6
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        for (var row = 0; row < 5; row++)
+        for (var row = 0; row < 6; row++)
         {
             panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         }
@@ -191,6 +194,47 @@ public sealed class MainForm : Form
         relationshipPanel.Controls.Add(_includeRealizationCheckBox);
         relationshipPanel.Controls.Add(_includeAssociationCheckBox);
         relationshipPanel.Controls.Add(_includeDependencyCheckBox);
+
+        var relatedLabel = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "検索ファイル"
+        };
+
+        var relatedPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true
+        };
+
+        ConfigureRelationshipCheckBox(_includeRelatedTypesCheckBox, "関連型も表示", checkedByDefault: true);
+        _includeRelatedTypesCheckBox.CheckedChanged += (_, _) => UpdateRelatedOptionState();
+
+        var relatedDepthLabel = new Label
+        {
+            AutoSize = true,
+            Text = "深さ",
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, 8, 6, 4)
+        };
+
+        _relatedDepthNumericUpDown.Minimum = 0;
+        _relatedDepthNumericUpDown.Maximum = 99;
+        _relatedDepthNumericUpDown.Value = 1;
+        _relatedDepthNumericUpDown.Width = 64;
+        _relatedDepthNumericUpDown.Margin = new Padding(0, 4, 18, 4);
+
+        ConfigureRelationshipCheckBox(_unlimitedRelatedDepthCheckBox, "無制限", checkedByDefault: false);
+        _unlimitedRelatedDepthCheckBox.CheckedChanged += (_, _) => UpdateRelatedOptionState();
+
+        relatedPanel.Controls.Add(_includeRelatedTypesCheckBox);
+        relatedPanel.Controls.Add(relatedDepthLabel);
+        relatedPanel.Controls.Add(_relatedDepthNumericUpDown);
+        relatedPanel.Controls.Add(_unlimitedRelatedDepthCheckBox);
 
         var splitLabel = new Label
         {
@@ -247,13 +291,16 @@ public sealed class MainForm : Form
         panel.Controls.Add(_displayModeComboBox, 1, 0);
         panel.Controls.Add(relationshipLabel, 0, 1);
         panel.Controls.Add(relationshipPanel, 1, 1);
-        panel.Controls.Add(splitLabel, 0, 2);
-        panel.Controls.Add(_splitOutputCheckBox, 1, 2);
-        panel.Controls.Add(splitModeLabel, 0, 3);
-        panel.Controls.Add(_splitModeComboBox, 1, 3);
-        panel.Controls.Add(splitFileLabel, 0, 4);
-        panel.Controls.Add(splitFilePanel, 1, 4);
+        panel.Controls.Add(relatedLabel, 0, 2);
+        panel.Controls.Add(relatedPanel, 1, 2);
+        panel.Controls.Add(splitLabel, 0, 3);
+        panel.Controls.Add(_splitOutputCheckBox, 1, 3);
+        panel.Controls.Add(splitModeLabel, 0, 4);
+        panel.Controls.Add(_splitModeComboBox, 1, 4);
+        panel.Controls.Add(splitFileLabel, 0, 5);
+        panel.Controls.Add(splitFilePanel, 1, 5);
 
+        UpdateRelatedOptionState();
         UpdateSplitOptionState();
         group.Controls.Add(panel);
         return group;
@@ -460,21 +507,38 @@ public sealed class MainForm : Form
         return panel;
     }
 
-    private void BrowseProjectFolder(object? sender, EventArgs e)
+    private void BrowseProjectFile(object? sender, EventArgs e)
     {
-        if (TrySelectFolder("対象プロジェクトフォルダを選択", _projectFolderTextBox.Text, out var folder))
+        using var dialog = new OpenFileDialog
         {
-            _projectFolderTextBox.Text = folder;
+            Title = "対象プロジェクトファイルを選択",
+            Filter = "C# project files (*.csproj)|*.csproj|All files (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+
+        var currentDirectory = GetProjectDirectory(_projectFolderTextBox.Text);
+        if (!string.IsNullOrWhiteSpace(currentDirectory) && Directory.Exists(currentDirectory))
+        {
+            dialog.InitialDirectory = currentDirectory;
+        }
+
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            _projectFolderTextBox.Text = dialog.FileName;
             if (string.IsNullOrWhiteSpace(_searchFolderTextBox.Text))
             {
-                _searchFolderTextBox.Text = folder;
+                _searchFolderTextBox.Text = Path.GetDirectoryName(dialog.FileName) ?? string.Empty;
             }
         }
     }
 
     private void BrowseSearchFolder(object? sender, EventArgs e)
     {
-        if (TrySelectFolder("検索対象フォルダを選択", _searchFolderTextBox.Text, out var folder))
+        var currentValue = string.IsNullOrWhiteSpace(_searchFolderTextBox.Text)
+            ? GetProjectDirectory(_projectFolderTextBox.Text) ?? string.Empty
+            : _searchFolderTextBox.Text;
+        if (TrySelectFolder("検索対象フォルダを選択", currentValue, out var folder))
         {
             _searchFolderTextBox.Text = folder;
         }
@@ -493,6 +557,14 @@ public sealed class MainForm : Form
         if (!string.IsNullOrWhiteSpace(_searchFolderTextBox.Text) && Directory.Exists(_searchFolderTextBox.Text))
         {
             dialog.InitialDirectory = _searchFolderTextBox.Text;
+        }
+        else
+        {
+            var projectDirectory = GetProjectDirectory(_projectFolderTextBox.Text);
+            if (!string.IsNullOrWhiteSpace(projectDirectory) && Directory.Exists(projectDirectory))
+            {
+                dialog.InitialDirectory = projectDirectory;
+            }
         }
 
         if (dialog.ShowDialog(this) == DialogResult.OK)
@@ -549,6 +621,18 @@ public sealed class MainForm : Form
 
         folder = string.Empty;
         return false;
+    }
+
+    private static string? GetProjectDirectory(string projectValue)
+    {
+        if (string.IsNullOrWhiteSpace(projectValue))
+        {
+            return null;
+        }
+
+        return File.Exists(projectValue)
+            ? Path.GetDirectoryName(projectValue)
+            : projectValue;
     }
 
     private async void GenerateButton_Click(object? sender, EventArgs e)
@@ -609,21 +693,21 @@ public sealed class MainForm : Form
 
     private bool TryCreateRequest(out GenerationRequest request)
     {
-        var projectFolder = _projectFolderTextBox.Text.Trim();
+        var projectFile = _projectFolderTextBox.Text.Trim();
         var searchFolder = _searchFolderTextBox.Text.Trim();
         var searchFile = _searchFileTextBox.Text.Trim();
         var outputPath = _outputPathTextBox.Text.Trim();
 
-        if (string.IsNullOrWhiteSpace(projectFolder))
+        if (string.IsNullOrWhiteSpace(projectFile))
         {
-            ShowValidationError("対象プロジェクトフォルダを入力してください。");
+            ShowValidationError("対象プロジェクトの .csproj を入力してください。");
             request = default!;
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(searchFile) && string.IsNullOrWhiteSpace(searchFolder))
+        if (!projectFile.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
         {
-            ShowValidationError("検索対象ファイルが空の場合は、検索対象フォルダを入力してください。");
+            ShowValidationError("対象プロジェクトには .csproj ファイルを指定してください。");
             request = default!;
             return false;
         }
@@ -636,7 +720,7 @@ public sealed class MainForm : Form
         }
 
         request = new GenerationRequest(
-            projectFolder,
+            projectFile,
             searchFolder,
             string.IsNullOrWhiteSpace(searchFile) ? null : searchFile,
             outputPath)
@@ -652,7 +736,11 @@ public sealed class MainForm : Form
                     Enabled: _splitOutputCheckBox.Checked,
                     Mode: GetSelectedSplitMode(),
                     IncludeOverview: _includeSplitOverviewCheckBox.Checked,
-                    IncludeIndex: _includeSplitIndexCheckBox.Checked)
+                    IncludeIndex: _includeSplitIndexCheckBox.Checked),
+                RelatedTypes = new RelatedTypeOptions(
+                    Enabled: _includeRelatedTypesCheckBox.Checked,
+                    Depth: (int)_relatedDepthNumericUpDown.Value,
+                    Unlimited: _unlimitedRelatedDepthCheckBox.Checked)
             }
         };
         return true;
@@ -683,6 +771,13 @@ public sealed class MainForm : Form
         _splitModeComboBox.Enabled = enabled;
         _includeSplitOverviewCheckBox.Enabled = enabled;
         _includeSplitIndexCheckBox.Enabled = enabled;
+    }
+
+    private void UpdateRelatedOptionState()
+    {
+        var enabled = _includeRelatedTypesCheckBox.Checked;
+        _unlimitedRelatedDepthCheckBox.Enabled = enabled;
+        _relatedDepthNumericUpDown.Enabled = enabled && !_unlimitedRelatedDepthCheckBox.Checked;
     }
 
     private void ShowValidationError(string message)

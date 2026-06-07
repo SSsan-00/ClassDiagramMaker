@@ -26,6 +26,16 @@ public sealed record DiagramGenerationOptions(
     public static DiagramGenerationOptions Default { get; } = new();
 
     public DiagramSplitOptions SplitOutput { get; init; } = DiagramSplitOptions.Disabled;
+
+    public RelatedTypeOptions RelatedTypes { get; init; } = RelatedTypeOptions.Disabled;
+}
+
+public sealed record RelatedTypeOptions(
+    bool Enabled = false,
+    int Depth = 1,
+    bool Unlimited = false)
+{
+    public static RelatedTypeOptions Disabled { get; } = new();
 }
 
 public enum DiagramSplitMode
