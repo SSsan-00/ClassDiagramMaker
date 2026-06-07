@@ -137,14 +137,14 @@ classDiagram
     direction LR
     class Repository_T {
         <<abstract>>
-        where T : class, new()
-        #{static readonly} CacheKey: string
-        +{abstract} Create~TArg~(arg: TArg): T where TArg : struct
+        #string CacheKey$
+        +Create~TArg~(TArg arg) T*
     }
+    note for Repository_T "where T : class, new()\\nCacheKey modifiers: static readonly\\nCreate constraints: where TArg : struct"
     class Pages_Users_Index {
         <<razor page>>
-        +Model: Demo.Pages.Users.IndexModel
-        +Repository: Demo.Services.IUserRepository
+        +Demo.Pages.Users.IndexModel Model
+        +Demo.Services.IUserRepository Repository
     }
     UserRepository <|.. UserService
     UserService --> UserRepository : repository

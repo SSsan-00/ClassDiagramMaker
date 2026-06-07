@@ -59,7 +59,7 @@ public sealed class ClassDiagramServiceTests
         Assert.Equal(4, result.TypeCount);
         Assert.Contains("Demo_Services_IUserRepository <|.. Demo_Services_UserService", result.Mermaid);
         Assert.Contains("Demo_Services_UserService --> Demo_Services_UserRepository : repository", result.Mermaid);
-        Assert.Contains("+Id: int", result.Mermaid);
+        Assert.Contains("+int Id", result.Mermaid);
         Assert.True(File.Exists(workspace.OutputPath));
     }
 
@@ -145,9 +145,9 @@ public sealed class ClassDiagramServiceTests
         Assert.Equal(3, result.TypeCount);
         Assert.Contains("class Pages_Users_Index", result.Mermaid);
         Assert.Contains("<<razor page>>", result.Mermaid);
-        Assert.Contains("+Model: Demo.Pages.Users.IndexModel", result.Mermaid);
-        Assert.Contains("+Repository: Demo.Services.IUserRepository", result.Mermaid);
-        Assert.Contains("+Heading: string", result.Mermaid);
+        Assert.Contains("+Demo.Pages.Users.IndexModel Model", result.Mermaid);
+        Assert.Contains("+Demo.Services.IUserRepository Repository", result.Mermaid);
+        Assert.Contains("+string Heading", result.Mermaid);
         Assert.Contains("Pages_Users_Index --> Demo_Pages_Users_IndexModel : Model", result.Mermaid);
         Assert.Contains("Pages_Users_Index --> Demo_Services_IUserRepository : Repository", result.Mermaid);
     }
@@ -187,8 +187,8 @@ public sealed class ClassDiagramServiceTests
         Assert.Equal(2, result.TypeCount);
         Assert.Contains("class Pages_About", result.Mermaid);
         Assert.Contains("class Demo_Pages_AboutModel", result.Mermaid);
-        Assert.Contains("+Model: Demo.Pages.AboutModel", result.Mermaid);
-        Assert.Contains("+Title: string", result.Mermaid);
+        Assert.Contains("+Demo.Pages.AboutModel Model", result.Mermaid);
+        Assert.Contains("+string Title", result.Mermaid);
         Assert.Contains("Pages_About --> Demo_Pages_AboutModel : Model", result.Mermaid);
         Assert.DoesNotContain("Pages_Ignored", result.Mermaid);
     }
@@ -228,8 +228,8 @@ public sealed class ClassDiagramServiceTests
         Assert.Equal(2, result.TypeCount);
         Assert.Contains("class Pages_About", result.Mermaid);
         Assert.Contains("class Demo_Pages_AboutModel", result.Mermaid);
-        Assert.Contains("+Model: Demo.Pages.AboutModel", result.Mermaid);
-        Assert.Contains("+Title: string", result.Mermaid);
+        Assert.Contains("+Demo.Pages.AboutModel Model", result.Mermaid);
+        Assert.Contains("+string Title", result.Mermaid);
         Assert.Contains("Pages_About --> Demo_Pages_AboutModel : Model", result.Mermaid);
         Assert.DoesNotContain("Pages_Ignored", result.Mermaid);
     }
@@ -294,9 +294,14 @@ public sealed class ClassDiagramServiceTests
         Assert.Contains("<<readonly>>", result.Mermaid);
         Assert.Contains("where T : class, new()", result.Mermaid);
         Assert.Contains("where T : unmanaged", result.Mermaid);
-        Assert.Contains("#{static readonly} CacheKey: string", result.Mermaid);
-        Assert.Contains("+{abstract} Create~TArg~(arg: TArg): T where TArg : struct", result.Mermaid);
-        Assert.Contains("+{static} Count: int", result.Mermaid);
+        Assert.Contains("#string CacheKey$", result.Mermaid);
+        Assert.Contains("+Create~TArg~(TArg arg) T*", result.Mermaid);
+        Assert.Contains("+int Count$", result.Mermaid);
+        Assert.Contains("note for Demo_Repository_T", result.Mermaid);
+        Assert.Contains("CacheKey modifiers: static readonly", result.Mermaid);
+        Assert.Contains("Create constraints: where TArg : struct", result.Mermaid);
+        AssertClassBodyLinesDoNotContain(result.Mermaid, "{");
+        AssertClassBodyLinesDoNotContain(result.Mermaid, ": ");
     }
 
     [Fact]
@@ -344,7 +349,7 @@ public sealed class ClassDiagramServiceTests
         Assert.Contains("where T : class", result.Mermaid);
         Assert.Contains("class Demo_FileScoped_Repository_T_Entry", result.Mermaid);
         Assert.Contains("<<sealed>>", result.Mermaid);
-        Assert.Contains("+Value: T", result.Mermaid);
+        Assert.Contains("+T Value", result.Mermaid);
         Assert.Contains("class Demo_BlockScoped_Snapshot_T", result.Mermaid);
         Assert.Contains("<<record>>", result.Mermaid);
         Assert.Contains("<<readonly>>", result.Mermaid);
@@ -381,11 +386,11 @@ public sealed class ClassDiagramServiceTests
 
         Assert.Contains("class Demo_IRepository_T", result.Mermaid);
         Assert.Contains("<<interface>>", result.Mermaid);
-        Assert.Contains("+Current: T", result.Mermaid);
-        Assert.Contains("+Changed: System.EventHandler", result.Mermaid);
-        Assert.Contains("+this[index: int]: T", result.Mermaid);
-        Assert.Contains("+Find~TQuery~(query: TQuery): T where TQuery : class", result.Mermaid);
-        Assert.DoesNotContain("-Current: T", result.Mermaid);
+        Assert.Contains("+T Current", result.Mermaid);
+        Assert.Contains("+System.EventHandler Changed", result.Mermaid);
+        Assert.Contains("+this(int index) T", result.Mermaid);
+        Assert.Contains("+Find~TQuery~(TQuery query) T", result.Mermaid);
+        Assert.DoesNotContain("-T Current", result.Mermaid);
         Assert.DoesNotContain("-Find~TQuery~", result.Mermaid);
     }
 
@@ -424,7 +429,7 @@ public sealed class ClassDiagramServiceTests
             new Progress<GenerationProgress>(),
             CancellationToken.None);
 
-        Assert.Contains("-{readonly} users: System.Collections.Generic.IReadOnlyDictionary~string, System.Collections.Generic.IReadOnlyList~UserDto?~~", result.Mermaid);
+        Assert.Contains("-System.Collections.Generic.IReadOnlyDictionary~string_System.Collections.Generic.IReadOnlyList~UserDto?~~ users", result.Mermaid);
         Assert.Contains("Demo_Aggregate --> Demo_UserDto : users", result.Mermaid);
         Assert.Contains("Demo_Aggregate ..> Demo_UserDto : Get", result.Mermaid);
         Assert.Contains("Demo_Aggregate ..> Demo_UserStatus : Get", result.Mermaid);
@@ -480,8 +485,8 @@ public sealed class ClassDiagramServiceTests
         Assert.Equal(5, result.TypeCount);
         Assert.Equal(1, CountOccurrences(result.Mermaid, "class Demo_CustomerService {"));
         Assert.Contains("<<partial>>", result.Mermaid);
-        Assert.Contains("+Current: Customer", result.Mermaid);
-        Assert.Contains("+Find(id: CustomerId): Customer", result.Mermaid);
+        Assert.Contains("+Customer Current", result.Mermaid);
+        Assert.Contains("+Find(CustomerId id) Customer", result.Mermaid);
         Assert.Contains("Demo_BaseService <|-- Demo_CustomerService", result.Mermaid);
         Assert.Contains("Demo_ICustomerService <|.. Demo_CustomerService", result.Mermaid);
         Assert.Contains("Demo_CustomerService --> Demo_Customer : Current", result.Mermaid);
@@ -695,7 +700,7 @@ public sealed class ClassDiagramServiceTests
         Assert.Equal(6, result.TypeCount);
         Assert.Contains("class Demo_UserMapper", result.Mermaid);
         Assert.Contains("<<delegate>>", result.Mermaid);
-        Assert.Contains("+Invoke(entity: UserEntity): UserDto", result.Mermaid);
+        Assert.Contains("+Invoke(UserEntity entity) UserDto", result.Mermaid);
         Assert.Contains("Demo_Worker ..> Demo_UserRepository : Worker", result.Mermaid);
         Assert.Contains("Demo_Worker ..> Demo_IClock : Worker", result.Mermaid);
         Assert.Contains("Demo_Worker ..> Demo_UserDto : Run", result.Mermaid);
@@ -795,8 +800,8 @@ public sealed class ClassDiagramServiceTests
         Assert.Contains("class Demo_Repository_T", result.Mermaid);
         Assert.Contains("<<abstract>>", result.Mermaid);
         Assert.Contains("where T : class", result.Mermaid);
-        Assert.DoesNotContain("+Name: string", result.Mermaid);
-        Assert.DoesNotContain("+Create(): T", result.Mermaid);
+        Assert.DoesNotContain("+string Name", result.Mermaid);
+        Assert.DoesNotContain("+Create() T", result.Mermaid);
     }
 
     [Fact]
@@ -839,10 +844,10 @@ public sealed class ClassDiagramServiceTests
             new Progress<GenerationProgress>(),
             CancellationToken.None);
 
-        Assert.Contains("-{readonly} repository: UserRepository", result.Mermaid);
-        Assert.Contains("+Current: User?", result.Mermaid);
-        Assert.DoesNotContain("+UserService(repository: UserRepository)", result.Mermaid);
-        Assert.DoesNotContain("+Find(id: int): User?", result.Mermaid);
+        Assert.Contains("-UserRepository repository", result.Mermaid);
+        Assert.Contains("+User? Current", result.Mermaid);
+        Assert.DoesNotContain("+UserService(UserRepository repository)", result.Mermaid);
+        Assert.DoesNotContain("+Find(int id) User?", result.Mermaid);
     }
 
     [Theory]
@@ -1121,7 +1126,7 @@ public sealed class ClassDiagramServiceTests
 
         var domainDiagram = File.ReadAllText(domainPath);
         Assert.Contains("class Demo_Domain_User", domainDiagram);
-        Assert.Contains("+Name: string", domainDiagram);
+        Assert.Contains("+string Name", domainDiagram);
     }
 
     [Fact]
@@ -1156,7 +1161,7 @@ public sealed class ClassDiagramServiceTests
 
         var servicesDiagram = File.ReadAllText(workspace.GetOutputPath(".Demo.Services.mmd"));
         Assert.Contains("class Demo_Services_UserService", servicesDiagram);
-        Assert.DoesNotContain("+Name: string", servicesDiagram);
+        Assert.DoesNotContain("+string Name", servicesDiagram);
     }
 
     [Fact]
@@ -1188,6 +1193,31 @@ public sealed class ClassDiagramServiceTests
         Assert.Equal(emptyPath, result.OutputPath);
         Assert.Equal(new[] { emptyPath }, result.OutputPaths);
         Assert.Contains("classDiagram", File.ReadAllText(emptyPath));
+    }
+
+    private static void AssertClassBodyLinesDoNotContain(string mermaid, string unexpected)
+    {
+        var inClassBody = false;
+        foreach (var line in mermaid.Split(Environment.NewLine))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("class ", StringComparison.Ordinal) && trimmed.EndsWith("{", StringComparison.Ordinal))
+            {
+                inClassBody = true;
+                continue;
+            }
+
+            if (inClassBody && trimmed == "}")
+            {
+                inClassBody = false;
+                continue;
+            }
+
+            if (inClassBody && !trimmed.StartsWith("<<", StringComparison.Ordinal))
+            {
+                Assert.DoesNotContain(unexpected, trimmed);
+            }
+        }
     }
 
     private static int CountOccurrences(string value, string pattern)
