@@ -235,6 +235,78 @@ public sealed class ClassDiagramServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_WhenRelatedTypesUseReferencedMembersOnly_HidesUnusedRelatedMembers()
+    {
+        using var workspace = TestWorkspace.Create();
+        var projectFile = workspace.WriteProjectFile();
+        var selectedFile = workspace.WriteSource(
+            "Services/UserService.cs",
+            """
+            namespace Demo.Services;
+
+            public sealed class UserService
+            {
+                private readonly UserRepository repository = new();
+
+                public UserDto Create(CreateUserCommand command)
+                {
+                    return repository.Create(command);
+                }
+
+                public void LocalOnly()
+                {
+                }
+            }
+            """);
+        workspace.WriteSource(
+            "Services/UserRepository.cs",
+            """
+            namespace Demo.Services;
+
+            public sealed class UserRepository
+            {
+                public UserDto Create(CreateUserCommand command) => new();
+
+                public void Delete(int id)
+                {
+                }
+            }
+
+            public sealed class CreateUserCommand
+            {
+            }
+
+            public sealed class UserDto
+            {
+            }
+            """);
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(projectFile, workspace.Root, selectedFile, workspace.OutputPath)
+            {
+                Options = new DiagramGenerationOptions
+                {
+                    RelatedTypes = new RelatedTypeOptions(
+                        Enabled: true,
+                        Depth: 1,
+                        ShowReferencedMembersOnly: true)
+                }
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Contains("class Demo_Services_UserService", result.Mermaid);
+        Assert.Contains("class Demo_Services_UserRepository", result.Mermaid);
+
+        var repositoryBlock = GetClassBlock(result.Mermaid, "Demo_Services_UserRepository");
+        Assert.Contains("+Create(CreateUserCommand command) UserDto", repositoryBlock);
+        Assert.DoesNotContain("+Delete(int id) void", repositoryBlock);
+
+        Assert.Contains("+LocalOnly() void", GetClassBlock(result.Mermaid, "Demo_Services_UserService"));
+        Assert.Contains("+Create(CreateUserCommand command) UserDto", GetClassBlock(result.Mermaid, "Demo_Services_UserService"));
+    }
+
+    [Fact]
     public async Task GenerateAsync_IncludesRazorPagesAndCodeBehind()
     {
         using var workspace = TestWorkspace.Create();
@@ -1327,6 +1399,32 @@ public sealed class ClassDiagramServiceTests
         Assert.Equal(emptyPath, result.OutputPath);
         Assert.Equal(new[] { emptyPath }, result.OutputPaths);
         Assert.Contains("classDiagram", File.ReadAllText(emptyPath));
+    }
+
+    private static string GetClassBlock(string mermaid, string classId)
+    {
+        var lines = mermaid.Split(Environment.NewLine);
+        for (var index = 0; index < lines.Length; index++)
+        {
+            if (!string.Equals(lines[index].Trim(), $"class {classId} {{", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var block = new List<string> { lines[index] };
+            for (var blockIndex = index + 1; blockIndex < lines.Length; blockIndex++)
+            {
+                block.Add(lines[blockIndex]);
+                if (string.Equals(lines[blockIndex].Trim(), "}", StringComparison.Ordinal))
+                {
+                    break;
+                }
+            }
+
+            return string.Join(Environment.NewLine, block);
+        }
+
+        return string.Empty;
     }
 
     private static void AssertClassBodyLinesDoNotContain(string mermaid, string unexpected)

@@ -108,12 +108,18 @@ public sealed class ClassDiagramService
         var relationships = RelationshipBuilder.Build(types, request.Options);
         if (!string.IsNullOrWhiteSpace(options.SearchFile) && request.Options.RelatedTypes.Enabled)
         {
+            var selectedFiles = ExpandSelectedSourceFile(options.SearchFile);
+            var selectedTypeIds = GetSelectedTypeIds(types, selectedFiles);
             types = SelectRelatedTypes(
                 types,
                 relationships,
-                ExpandSelectedSourceFile(options.SearchFile),
+                selectedTypeIds,
                 request.Options.RelatedTypes);
             relationships = FilterRelationships(relationships, types);
+            if (request.Options.RelatedTypes.ShowReferencedMembersOnly)
+            {
+                types = ApplyReferencedMemberFilter(types, selectedTypeIds);
+            }
         }
 
         progress.Report(new GenerationProgress(
@@ -392,14 +398,9 @@ public sealed class ClassDiagramService
     private static List<DiagramType> SelectRelatedTypes(
         IReadOnlyList<DiagramType> types,
         IReadOnlyList<DiagramRelationship> relationships,
-        IReadOnlyCollection<string> selectedFiles,
+        HashSet<string> selectedTypeIds,
         RelatedTypeOptions options)
     {
-        var selectedFileSet = selectedFiles.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var selectedTypeIds = types
-            .Where(type => HasAnySourceFile(type, selectedFileSet))
-            .Select(type => type.Id)
-            .ToHashSet(StringComparer.Ordinal);
         if (selectedTypeIds.Count == 0)
         {
             return new List<DiagramType>();
@@ -440,6 +441,156 @@ public sealed class ClassDiagramService
             .Where(type => includedTypeIds.Contains(type.Id))
             .OrderBy(type => type.FullName, StringComparer.Ordinal)
             .ToList();
+    }
+
+    private static HashSet<string> GetSelectedTypeIds(
+        IReadOnlyList<DiagramType> types,
+        IReadOnlyCollection<string> selectedFiles)
+    {
+        var selectedFileSet = selectedFiles.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return types
+            .Where(type => HasAnySourceFile(type, selectedFileSet))
+            .Select(type => type.Id)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    private static List<DiagramType> ApplyReferencedMemberFilter(
+        IReadOnlyList<DiagramType> types,
+        HashSet<string> selectedTypeIds)
+    {
+        if (selectedTypeIds.Count == 0)
+        {
+            return types.ToList();
+        }
+
+        var typesById = types.ToDictionary(type => type.Id, StringComparer.Ordinal);
+        var usedMembersByTypeId = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var queued = new Queue<(string TypeId, string MemberName)>();
+
+        foreach (var selectedType in types.Where(type => selectedTypeIds.Contains(type.Id)))
+        {
+            foreach (var member in selectedType.Members)
+            {
+                EnqueueReferencedMembers(types, member, selectedType, queued);
+            }
+        }
+
+        while (queued.Count > 0)
+        {
+            var (typeId, memberName) = queued.Dequeue();
+            if (!typesById.TryGetValue(typeId, out var type))
+            {
+                continue;
+            }
+
+            if (!usedMembersByTypeId.TryGetValue(typeId, out var usedMembers))
+            {
+                usedMembers = new HashSet<string>(StringComparer.Ordinal);
+                usedMembersByTypeId[typeId] = usedMembers;
+            }
+
+            if (!usedMembers.Add(memberName))
+            {
+                continue;
+            }
+
+            foreach (var member in type.Members.Where(member => IsReferencedMember(member, memberName)))
+            {
+                EnqueueReferencedMembers(types, member, type, queued);
+            }
+        }
+
+        return types
+            .Select(type =>
+            {
+                if (selectedTypeIds.Contains(type.Id))
+                {
+                    return type;
+                }
+
+                var usedMembers = usedMembersByTypeId.TryGetValue(type.Id, out var names)
+                    ? names
+                    : new HashSet<string>(StringComparer.Ordinal);
+
+                return type with
+                {
+                    Members = type.Members
+                        .Where(member => usedMembers.Any(name => IsReferencedMember(member, name)))
+                        .ToArray()
+                };
+            })
+            .ToList();
+    }
+
+    private static void EnqueueReferencedMembers(
+        IReadOnlyList<DiagramType> types,
+        DiagramMember member,
+        DiagramType context,
+        Queue<(string TypeId, string MemberName)> queued)
+    {
+        foreach (var reference in member.ReferencedMembers)
+        {
+            var target = ResolveReferencedType(types, reference.TypeName, context);
+            if (target is not null)
+            {
+                queued.Enqueue((target.Id, reference.MemberName));
+            }
+        }
+    }
+
+    private static bool IsReferencedMember(DiagramMember member, string memberName)
+    {
+        return string.Equals(member.Name, memberName, StringComparison.Ordinal);
+    }
+
+    private static DiagramType? ResolveReferencedType(
+        IReadOnlyList<DiagramType> types,
+        string typeName,
+        DiagramType context)
+    {
+        var normalized = NormalizeDependencyName(typeName);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        var exact = types
+            .Where(type => string.Equals(NormalizeDependencyName(type.FullName), normalized, StringComparison.Ordinal))
+            .ToArray();
+        if (exact.Length == 1)
+        {
+            return exact[0];
+        }
+
+        if (normalized.Contains('.', StringComparison.Ordinal))
+        {
+            var suffixMatch = types
+                .Where(type => NormalizeDependencyName(type.FullName).EndsWith($".{normalized}", StringComparison.Ordinal))
+                .ToArray();
+            if (suffixMatch.Length == 1)
+            {
+                return suffixMatch[0];
+            }
+        }
+
+        var simpleName = normalized.Split('.').Last();
+        var simpleMatches = types
+            .Where(type => string.Equals(type.SimpleName, simpleName, StringComparison.Ordinal))
+            .ToArray();
+        if (simpleMatches.Length == 0)
+        {
+            return null;
+        }
+
+        var sameNamespace = simpleMatches
+            .Where(type => string.Equals(type.Namespace, context.Namespace, StringComparison.Ordinal))
+            .ToArray();
+        if (sameNamespace.Length == 1)
+        {
+            return sameNamespace[0];
+        }
+
+        return simpleMatches.Length == 1 ? simpleMatches[0] : null;
     }
 
     private static IReadOnlyList<DiagramRelationship> FilterRelationships(

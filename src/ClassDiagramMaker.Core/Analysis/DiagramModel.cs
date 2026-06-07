@@ -59,7 +59,12 @@ public sealed record DiagramMember
     public IReadOnlyList<string> Modifiers { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> TypeParameterConstraints { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> ReferencedTypes { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<DiagramMemberReference> ReferencedMembers { get; init; } = Array.Empty<DiagramMemberReference>();
 }
+
+public sealed record DiagramMemberReference(
+    string TypeName,
+    string MemberName);
 
 public sealed record DiagramRelationship
 {

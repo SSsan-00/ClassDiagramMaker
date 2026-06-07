@@ -33,7 +33,8 @@ public sealed record DiagramGenerationOptions(
 public sealed record RelatedTypeOptions(
     bool Enabled = false,
     int Depth = 1,
-    bool Unlimited = false)
+    bool Unlimited = false,
+    bool ShowReferencedMembersOnly = false)
 {
     public static RelatedTypeOptions Disabled { get; } = new();
 }

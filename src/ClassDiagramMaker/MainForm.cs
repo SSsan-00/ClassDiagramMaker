@@ -21,6 +21,7 @@ public sealed class MainForm : Form
     private readonly CheckBox _includeRelatedTypesCheckBox = new();
     private readonly NumericUpDown _relatedDepthNumericUpDown = new();
     private readonly CheckBox _unlimitedRelatedDepthCheckBox = new();
+    private readonly CheckBox _showReferencedMembersOnlyCheckBox = new();
     private readonly CheckBox _splitOutputCheckBox = new();
     private readonly ComboBox _splitModeComboBox = new();
     private readonly CheckBox _includeSplitOverviewCheckBox = new();
@@ -231,10 +232,13 @@ public sealed class MainForm : Form
         ConfigureRelationshipCheckBox(_unlimitedRelatedDepthCheckBox, "無制限", checkedByDefault: false);
         _unlimitedRelatedDepthCheckBox.CheckedChanged += (_, _) => UpdateRelatedOptionState();
 
+        ConfigureRelationshipCheckBox(_showReferencedMembersOnlyCheckBox, "関連型は使用メンバーのみ", checkedByDefault: false);
+
         relatedPanel.Controls.Add(_includeRelatedTypesCheckBox);
         relatedPanel.Controls.Add(relatedDepthLabel);
         relatedPanel.Controls.Add(_relatedDepthNumericUpDown);
         relatedPanel.Controls.Add(_unlimitedRelatedDepthCheckBox);
+        relatedPanel.Controls.Add(_showReferencedMembersOnlyCheckBox);
 
         var splitLabel = new Label
         {
@@ -740,7 +744,8 @@ public sealed class MainForm : Form
                 RelatedTypes = new RelatedTypeOptions(
                     Enabled: _includeRelatedTypesCheckBox.Checked,
                     Depth: (int)_relatedDepthNumericUpDown.Value,
-                    Unlimited: _unlimitedRelatedDepthCheckBox.Checked)
+                    Unlimited: _unlimitedRelatedDepthCheckBox.Checked,
+                    ShowReferencedMembersOnly: _showReferencedMembersOnlyCheckBox.Checked)
             }
         };
         return true;
@@ -778,6 +783,7 @@ public sealed class MainForm : Form
         var enabled = _includeRelatedTypesCheckBox.Checked;
         _unlimitedRelatedDepthCheckBox.Enabled = enabled;
         _relatedDepthNumericUpDown.Enabled = enabled && !_unlimitedRelatedDepthCheckBox.Checked;
+        _showReferencedMembersOnlyCheckBox.Enabled = enabled;
     }
 
     private void ShowValidationError(string message)

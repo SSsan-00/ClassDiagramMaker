@@ -329,6 +329,7 @@ internal static class SyntaxTypeCollector
         var defaultPublic = IsInterfaceMember(containingType);
         foreach (var variable in field.Declaration.Variables)
         {
+            var bodyReferences = CollectMemberBodyReferences(field, semanticModel);
             yield return new DiagramMember
             {
                 Kind = DiagramMemberKind.Field,
@@ -340,9 +341,10 @@ internal static class SyntaxTypeCollector
                 Modifiers = GetNonAccessibilityModifiers(field.Modifiers),
                 ReferencedTypes = TypeReferenceCollector.Collect(field.Declaration.Type, semanticModel)
                     .Concat(CollectAttributeReferences(field.AttributeLists, semanticModel))
-                    .Concat(CollectMemberBodyReferences(field, semanticModel))
+                    .Concat(bodyReferences.Types)
                     .Distinct(StringComparer.Ordinal)
-                    .ToArray()
+                    .ToArray(),
+                ReferencedMembers = bodyReferences.Members
             };
         }
     }
@@ -354,6 +356,7 @@ internal static class SyntaxTypeCollector
     {
         var type = property.Type.ToString();
         var defaultPublic = IsInterfaceMember(containingType);
+        var bodyReferences = CollectMemberBodyReferences(property, semanticModel);
         return new DiagramMember
         {
             Kind = DiagramMemberKind.Property,
@@ -365,9 +368,10 @@ internal static class SyntaxTypeCollector
             Modifiers = GetNonAccessibilityModifiers(property.Modifiers),
             ReferencedTypes = TypeReferenceCollector.Collect(property.Type, semanticModel)
                 .Concat(CollectAttributeReferences(property.AttributeLists, semanticModel))
-                .Concat(CollectMemberBodyReferences(property, semanticModel))
+                .Concat(bodyReferences.Types)
                 .Distinct(StringComparer.Ordinal)
-                .ToArray()
+                .ToArray(),
+            ReferencedMembers = bodyReferences.Members
         };
     }
 
@@ -383,11 +387,12 @@ internal static class SyntaxTypeCollector
             : $"<{string.Join(", ", method.TypeParameterList.Parameters.Select(parameter => parameter.Identifier.ValueText))}>";
         var parameters = FormatParameters(method.ParameterList.Parameters);
         var constraints = FormatConstraintClauses(method.ConstraintClauses);
+        var bodyReferences = CollectMemberBodyReferences(method, semanticModel);
         var references = TypeReferenceCollector.Collect(method.ReturnType, semanticModel)
             .Concat(method.ParameterList.Parameters.SelectMany(parameter => TypeReferenceCollector.Collect(parameter.Type, semanticModel)))
             .Concat(CollectConstraintReferences(method.ConstraintClauses, semanticModel))
             .Concat(CollectAttributeReferences(method.AttributeLists, semanticModel))
-            .Concat(CollectMemberBodyReferences(method, semanticModel))
+            .Concat(bodyReferences.Types)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
         var coreSignature = $"{method.Identifier.ValueText}{typeParameters}({parameters}): {returnType}";
@@ -406,7 +411,8 @@ internal static class SyntaxTypeCollector
             IsStatic = HasModifier(method.Modifiers, SyntaxKind.StaticKeyword),
             Modifiers = GetNonAccessibilityModifiers(method.Modifiers),
             TypeParameterConstraints = constraints,
-            ReferencedTypes = references
+            ReferencedTypes = references,
+            ReferencedMembers = bodyReferences.Members
         };
     }
 
@@ -415,10 +421,11 @@ internal static class SyntaxTypeCollector
         SemanticModel? semanticModel)
     {
         var parameters = FormatParameters(constructor.ParameterList.Parameters);
+        var bodyReferences = CollectMemberBodyReferences(constructor, semanticModel);
         var references = constructor.ParameterList.Parameters
             .SelectMany(parameter => TypeReferenceCollector.Collect(parameter.Type, semanticModel))
             .Concat(CollectAttributeReferences(constructor.AttributeLists, semanticModel))
-            .Concat(CollectMemberBodyReferences(constructor, semanticModel))
+            .Concat(bodyReferences.Types)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
@@ -431,7 +438,8 @@ internal static class SyntaxTypeCollector
             Signature = CreateMemberSignature(constructor.Modifiers, $"{constructor.Identifier.ValueText}({parameters})"),
             IsStatic = HasModifier(constructor.Modifiers, SyntaxKind.StaticKeyword),
             Modifiers = GetNonAccessibilityModifiers(constructor.Modifiers),
-            ReferencedTypes = references
+            ReferencedTypes = references,
+            ReferencedMembers = bodyReferences.Members
         };
     }
 
@@ -442,6 +450,7 @@ internal static class SyntaxTypeCollector
     {
         var type = eventDeclaration.Type.ToString();
         var defaultPublic = IsInterfaceMember(containingType);
+        var bodyReferences = CollectMemberBodyReferences(eventDeclaration, semanticModel);
         return new DiagramMember
         {
             Kind = DiagramMemberKind.Event,
@@ -453,8 +462,10 @@ internal static class SyntaxTypeCollector
             Modifiers = GetNonAccessibilityModifiers(eventDeclaration.Modifiers),
             ReferencedTypes = TypeReferenceCollector.Collect(eventDeclaration.Type, semanticModel)
                 .Concat(CollectAttributeReferences(eventDeclaration.AttributeLists, semanticModel))
+                .Concat(bodyReferences.Types)
                 .Distinct(StringComparer.Ordinal)
-                .ToArray()
+                .ToArray(),
+            ReferencedMembers = bodyReferences.Members
         };
     }
 
@@ -467,6 +478,7 @@ internal static class SyntaxTypeCollector
         var defaultPublic = IsInterfaceMember(containingType);
         foreach (var variable in eventField.Declaration.Variables)
         {
+            var bodyReferences = CollectMemberBodyReferences(eventField, semanticModel);
             yield return new DiagramMember
             {
                 Kind = DiagramMemberKind.Event,
@@ -478,8 +490,10 @@ internal static class SyntaxTypeCollector
                 Modifiers = GetNonAccessibilityModifiers(eventField.Modifiers),
                 ReferencedTypes = TypeReferenceCollector.Collect(eventField.Declaration.Type, semanticModel)
                     .Concat(CollectAttributeReferences(eventField.AttributeLists, semanticModel))
+                    .Concat(bodyReferences.Types)
                     .Distinct(StringComparer.Ordinal)
-                    .ToArray()
+                    .ToArray(),
+                ReferencedMembers = bodyReferences.Members
             };
         }
     }
@@ -492,10 +506,11 @@ internal static class SyntaxTypeCollector
         var type = indexer.Type.ToString();
         var defaultPublic = IsInterfaceMember(containingType);
         var parameters = FormatParameters(indexer.ParameterList.Parameters);
+        var bodyReferences = CollectMemberBodyReferences(indexer, semanticModel);
         var references = TypeReferenceCollector.Collect(indexer.Type, semanticModel)
             .Concat(indexer.ParameterList.Parameters.SelectMany(parameter => TypeReferenceCollector.Collect(parameter.Type, semanticModel)))
             .Concat(CollectAttributeReferences(indexer.AttributeLists, semanticModel))
-            .Concat(CollectMemberBodyReferences(indexer, semanticModel))
+            .Concat(bodyReferences.Types)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
@@ -508,7 +523,8 @@ internal static class SyntaxTypeCollector
             Signature = CreateMemberSignature(indexer.Modifiers, $"this[{parameters}]: {type}", defaultPublic),
             IsStatic = HasModifier(indexer.Modifiers, SyntaxKind.StaticKeyword),
             Modifiers = GetNonAccessibilityModifiers(indexer.Modifiers),
-            ReferencedTypes = references
+            ReferencedTypes = references,
+            ReferencedMembers = bodyReferences.Members
         };
     }
 
@@ -607,11 +623,12 @@ internal static class SyntaxTypeCollector
         return references.ToArray();
     }
 
-    private static IReadOnlyList<string> CollectMemberBodyReferences(
+    private static MemberBodyReferences CollectMemberBodyReferences(
         MemberDeclarationSyntax member,
         SemanticModel? semanticModel)
     {
         var references = new HashSet<string>(StringComparer.Ordinal);
+        var memberReferences = new HashSet<DiagramMemberReference>();
 
         foreach (var typeSyntax in member.DescendantNodes().OfType<TypeSyntax>())
         {
@@ -620,27 +637,29 @@ internal static class SyntaxTypeCollector
 
         if (semanticModel is null)
         {
-            return references.ToArray();
+            return new MemberBodyReferences(references.ToArray(), Array.Empty<DiagramMemberReference>());
         }
 
         foreach (var invocation in member.DescendantNodes().OfType<InvocationExpressionSyntax>())
         {
-            AddSymbolReference(semanticModel.GetSymbolInfo(invocation).Symbol, references);
+            AddSymbolReference(semanticModel.GetSymbolInfo(invocation).Symbol, references, memberReferences);
         }
 
         foreach (var creation in member.DescendantNodes().OfType<ObjectCreationExpressionSyntax>())
         {
+            AddSymbolReference(semanticModel.GetSymbolInfo(creation).Symbol, references, memberReferences);
             AddTypeReference(semanticModel.GetTypeInfo(creation).Type, references);
         }
 
         foreach (var creation in member.DescendantNodes().OfType<ImplicitObjectCreationExpressionSyntax>())
         {
+            AddSymbolReference(semanticModel.GetSymbolInfo(creation).Symbol, references, memberReferences);
             AddTypeReference(semanticModel.GetTypeInfo(creation).Type, references);
         }
 
         foreach (var memberAccess in member.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
         {
-            AddSymbolReference(semanticModel.GetSymbolInfo(memberAccess).Symbol, references);
+            AddSymbolReference(semanticModel.GetSymbolInfo(memberAccess).Symbol, references, memberReferences);
         }
 
         foreach (var identifier in member.DescendantNodes().OfType<IdentifierNameSyntax>())
@@ -648,11 +667,11 @@ internal static class SyntaxTypeCollector
             var symbol = semanticModel.GetSymbolInfo(identifier).Symbol;
             if (symbol is IMethodSymbol { IsStatic: true } or IPropertySymbol { IsStatic: true } or IFieldSymbol { IsStatic: true } or IEventSymbol { IsStatic: true })
             {
-                AddSymbolReference(symbol, references);
+                AddSymbolReference(symbol, references, memberReferences);
             }
         }
 
-        return references.ToArray();
+        return new MemberBodyReferences(references.ToArray(), memberReferences.ToArray());
     }
 
     private static void AddReferences(IEnumerable<string> values, HashSet<string> references)
@@ -666,25 +685,32 @@ internal static class SyntaxTypeCollector
         }
     }
 
-    private static void AddSymbolReference(ISymbol? symbol, HashSet<string> references)
+    private static void AddSymbolReference(
+        ISymbol? symbol,
+        HashSet<string> references,
+        HashSet<DiagramMemberReference>? memberReferences = null)
     {
         switch (symbol)
         {
             case IMethodSymbol method:
+                AddMemberReference(method.ContainingType, GetMethodReferenceName(method), memberReferences);
                 AddTypeReference(method.ContainingType, references);
                 AddTypeReference(method.ReturnType, references);
                 AddReferences(SymbolTypeReferences.ToReferenceNames(method.Parameters.Select(parameter => parameter.Type)), references);
                 AddReferences(SymbolTypeReferences.ToReferenceNames(method.TypeArguments), references);
                 break;
             case IPropertySymbol property:
+                AddMemberReference(property.ContainingType, property.Name, memberReferences);
                 AddTypeReference(property.ContainingType, references);
                 AddTypeReference(property.Type, references);
                 break;
             case IFieldSymbol field:
+                AddMemberReference(field.ContainingType, field.Name, memberReferences);
                 AddTypeReference(field.ContainingType, references);
                 AddTypeReference(field.Type, references);
                 break;
             case IEventSymbol eventSymbol:
+                AddMemberReference(eventSymbol.ContainingType, eventSymbol.Name, memberReferences);
                 AddTypeReference(eventSymbol.ContainingType, references);
                 AddTypeReference(eventSymbol.Type, references);
                 break;
@@ -697,6 +723,30 @@ internal static class SyntaxTypeCollector
             case INamedTypeSymbol namedType:
                 AddTypeReference(namedType, references);
                 break;
+        }
+    }
+
+    private static string GetMethodReferenceName(IMethodSymbol method)
+    {
+        return method.MethodKind == MethodKind.Constructor
+            ? method.ContainingType.Name
+            : method.Name;
+    }
+
+    private static void AddMemberReference(
+        ITypeSymbol? containingType,
+        string memberName,
+        HashSet<DiagramMemberReference>? memberReferences)
+    {
+        if (memberReferences is null || string.IsNullOrWhiteSpace(memberName))
+        {
+            return;
+        }
+
+        var typeName = SymbolTypeReferences.ToReferenceName(containingType);
+        if (!string.IsNullOrWhiteSpace(typeName))
+        {
+            memberReferences.Add(new DiagramMemberReference(typeName, memberName));
         }
     }
 
@@ -740,6 +790,10 @@ internal static class SyntaxTypeCollector
             return $"{parameter.Identifier.ValueText}: {type}";
         }));
     }
+
+    private sealed record MemberBodyReferences(
+        IReadOnlyList<string> Types,
+        IReadOnlyList<DiagramMemberReference> Members);
 
     private static IReadOnlyList<string> FormatConstraintClauses(SyntaxList<TypeParameterConstraintClauseSyntax> clauses)
     {
