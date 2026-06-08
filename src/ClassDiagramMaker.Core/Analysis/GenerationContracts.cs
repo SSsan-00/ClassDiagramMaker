@@ -16,12 +16,19 @@ public enum DiagramDisplayMode
     AllMembers
 }
 
+public enum DiagramOutputFormat
+{
+    Mermaid,
+    Excel
+}
+
 public sealed record DiagramGenerationOptions(
     DiagramDisplayMode DisplayMode = DiagramDisplayMode.AllMembers,
     bool IncludeInheritance = true,
     bool IncludeRealization = true,
     bool IncludeAssociation = true,
-    bool IncludeDependency = true)
+    bool IncludeDependency = true,
+    DiagramOutputFormat OutputFormat = DiagramOutputFormat.Mermaid)
 {
     public static DiagramGenerationOptions Default { get; } = new();
 

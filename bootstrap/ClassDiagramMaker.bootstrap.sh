@@ -34,7 +34,7 @@ mkdir -p "$(dirname "$TARGET_DIR/README.md")"
 cat > "$TARGET_DIR/README.md" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
 # ClassDiagramMaker
 
-指定した C# のファイルやディレクトリを解析し、Mermaid のクラス図を生成するツールです。
+指定した C# のファイルやディレクトリを解析し、Mermaid または Excel のクラス図を生成するツールです。
 
 GUI は Windows 向けの WinForms アプリケーションです。
 
@@ -59,7 +59,7 @@ WinForms 画面で次の項目を指定します。
 - 対象プロジェクト `.csproj`
 - 検索対象フォルダ、任意
 - 検索対象ファイル、任意
-- 生成する `.mmd` ファイルの出力先
+- 生成する `.mmd` または `.xlsx` ファイルの出力先
 
 検索対象ファイルが空の場合は、検索対象フォルダ配下の `.cs`、`.cshtml.cs`、`.cshtml` ファイルを再帰的に解析します。検索対象フォルダも空の場合は、`.csproj` のあるフォルダを基準に解析します。GUI では解析中とレンダリング中の進捗を確認できます。
 
@@ -69,10 +69,13 @@ GUI では巨大なプロジェクトでも見やすくするため、出力内�
 
 - 表示モード: 型だけ、主要メンバー、全メンバー
 - 関係線: 継承、interface 実装、フィールド/プロパティ関連、メソッド依存を個別に切り替え
-- 検索対象ファイル指定時: 関連型も表示、関連の深さ、無制限、関連型は使用メンバーのみを切り替え
-- 分割出力: namespace 単位またはフォルダ単位で Mermaid ファイルを分割し、任意で `index.md` と全体図を生成
+- 出力形式: Mermaid `.mmd`、Excel `.xlsx`
+- 検索対象ファイル指定時または分割出力時: 関連型も表示、関連の深さ、無制限、関連型は使用メンバーのみを切り替え
+- 分割出力: Mermaid は 1 クラス 1 ファイル、Excel は 1 クラス 1 シートで出力
 
 検索対象ファイルを指定して「関連型も表示」を有効にすると、`.csproj` 配下の型を解析したうえで、選択ファイル内の型を起点に関係線で関連型を辿ります。深さ `0` は選択ファイル内の型のみ、深さ `1` は直接関連する型まで、深さ `2` は関連先からさらに直接関連する型までを出力します。「無制限」を有効にすると、プロジェクト内で辿れる関連型をすべて出力します。
+
+分割出力時も同じ深さ設定を使います。深さ `0` は対象クラスだけ、深さ `1` は対象クラスと直接関連クラス、深さ `2` は直接関連クラスの関連先までを各ファイルまたは各シートに含めます。全体図が必要な場合は分割出力をオフにします。
 
 「関連型は使用メンバーのみ」を有効にすると、選択ファイル自身の型は通常の表示モードに従い、関連型のメンバーだけを選択ファイルから実際に参照されたメソッド、プロパティ、フィールド、イベント、コンストラクタに絞ります。関連型の使用メンバーがさらに別のメンバーを呼び出す場合は、そのメンバーも辿って残します。
 
@@ -141,19 +144,21 @@ dotnet publish src/ClassDiagramMaker/ClassDiagramMaker.csproj -p:PublishProfile=
 
 ## 分割出力
 
-分割出力を有効にすると、指定した出力先のファイル名がプレフィックスとして使われます。
+Mermaid で分割出力を有効にすると、指定した出力先のファイル名がプレフィックスとして使われ、1 クラスごとに `.mmd` を生成します。
 たとえば `diagram.mmd` を指定すると、次のようなファイルを生成できます。
 
 ```text
 diagram.index.md
-diagram.all.mmd
-diagram.Demo.Services.mmd
-diagram.Demo.Models.mmd
+diagram.Demo.Services.UserService.mmd
+diagram.Demo.Services.UserRepository.mmd
+diagram.Demo.Models.UserDto.mmd
 ```
 
-namespace 分割では C# の namespace ごとに型をまとめます。フォルダ分割では、対象プロジェクトの `.csproj` があるフォルダから見たソースファイルの配置ごとに型をまとめます。
+`diagram.index.md` は任意で生成できます。分割出力では全体図ファイルは生成しません。全体図を確認する場合は分割出力をオフにしてください。
 
-分割された図では、同じ分割ファイル内にある型同士の関係だけを出力します。任意で生成できる `*.all.mmd` には全体図を保持します。
+Excel で分割出力を有効にすると、1 つの `.xlsx` 内に 1 クラス 1 シートで出力します。分割出力をオフにした場合は、1 つの `.xlsx` に `ClassDiagram` シートだけを作成します。
+
+分割された図では、対象クラスと関連深さオプションで辿った型、およびその範囲内で両端の型が存在する関係だけを出力します。
 
 ## 解析できる依存関係
 
@@ -170,7 +175,7 @@ C# ソースは Roslyn の AST と SemanticModel を使って解析します。�
 
 ## 出力形式
 
-最初に対応している出力形式は Mermaid の `classDiagram` です。
+Mermaid の `classDiagram` と Excel `.xlsx` に対応しています。
 
 ```mermaid
 classDiagram
@@ -189,6 +194,16 @@ classDiagram
     UserRepository <|.. UserService
     UserService --> UserRepository : repository
 ```
+
+Excel 出力では、同じ解析結果を 1 シート内に次の構造で配置します。
+
+- Diagram: クラスブロック
+- Types: 型一覧
+- Members: メンバー一覧
+- Relationships: 関係一覧
+- Mermaid: 同じ範囲の Mermaid テキスト
+
+Excel 分割出力では、この構造を 1 クラス 1 シートで作成します。
 
 ## Bootstrap
 
@@ -230,6 +245,37 @@ dotnet run --project .\src\ClassDiagramMaker\ClassDiagramMaker.csproj
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
+mkdir -p "$(dirname "$TARGET_DIR/THIRD-PARTY-NOTICES.md")"
+cat > "$TARGET_DIR/THIRD-PARTY-NOTICES.md" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
+# Third-Party Notices
+
+ClassDiagramMaker uses the following third-party components.
+
+## Runtime Dependencies
+
+| Component | Version | License | Purpose |
+|---|---:|---|---|
+| DocumentFormat.OpenXml | 3.5.1 | MIT | Excel `.xlsx` generation |
+| DocumentFormat.OpenXml.Framework | 3.5.1 | MIT | Transitive dependency of DocumentFormat.OpenXml |
+| System.IO.Packaging | 8.0.1 | MIT | Transitive dependency of DocumentFormat.OpenXml |
+| Microsoft.CodeAnalysis.CSharp | 4.12.0 | MIT | C# syntax and semantic analysis |
+| Microsoft.CodeAnalysis.Common | 4.12.0 | MIT | Transitive dependency of Microsoft.CodeAnalysis.CSharp |
+| Microsoft.CodeAnalysis.Analyzers | 3.3.4 | MIT | Transitive dependency of Microsoft.CodeAnalysis.CSharp |
+| System.Collections.Immutable | 8.0.0 | MIT | Transitive dependency of Microsoft.CodeAnalysis.CSharp |
+| System.Reflection.Metadata | 8.0.0 | MIT | Transitive dependency of Microsoft.CodeAnalysis.CSharp |
+
+## Test Dependencies
+
+| Component | Version | License | Purpose |
+|---|---:|---|---|
+| Microsoft.NET.Test.Sdk | 17.14.1 | MIT | Test execution |
+| xunit | 2.9.3 | Apache-2.0 | Unit testing |
+| xunit.runner.visualstudio | 3.1.4 | Apache-2.0 | Visual Studio test runner integration |
+
+The test dependencies are not required by the bootstrap source package and are not needed to run the application.
+
+__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
+
 mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker.Core/ClassDiagramMaker.Core.csproj")"
 cat > "$TARGET_DIR/src/ClassDiagramMaker.Core/ClassDiagramMaker.Core.csproj" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
 <Project Sdk="Microsoft.NET.Sdk">
@@ -246,6 +292,7 @@ cat > "$TARGET_DIR/src/ClassDiagramMaker.Core/ClassDiagramMaker.Core.csproj" <<'
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.12.0" />
   </ItemGroup>
 </Project>
@@ -389,9 +436,14 @@ public sealed class ClassDiagramService
 
         var displayTypes = ApplyDisplayMode(types, request.Options.DisplayMode);
         var mermaid = MermaidRenderer.Render(displayTypes, relationships);
-        var output = request.Options.SplitOutput.Enabled
-            ? await WriteSplitOutputAsync(options, request.Options.SplitOutput, displayTypes, relationships, mermaid, cancellationToken)
-            : await WriteSingleOutputAsync(options.OutputPath, mermaid, cancellationToken);
+        var output = request.Options.OutputFormat switch
+        {
+            DiagramOutputFormat.Mermaid => request.Options.SplitOutput.Enabled
+                ? await WriteSplitOutputAsync(options, request.Options, displayTypes, relationships, mermaid, cancellationToken)
+                : await WriteSingleOutputAsync(options.OutputPath, mermaid, cancellationToken),
+            DiagramOutputFormat.Excel => await WriteExcelOutputAsync(options, request.Options, displayTypes, relationships, mermaid, cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(nameof(request.Options.OutputFormat), request.Options.OutputFormat, null)
+        };
 
         progress.Report(new GenerationProgress(
             "Writing",
@@ -902,7 +954,7 @@ public sealed class ClassDiagramService
 
     private static async Task<GeneratedOutput> WriteSplitOutputAsync(
         NormalizedGenerationRequest request,
-        DiagramSplitOptions splitOptions,
+        DiagramGenerationOptions options,
         IReadOnlyList<DiagramType> displayTypes,
         IReadOnlyList<DiagramRelationship> relationships,
         string overviewMermaid,
@@ -911,18 +963,11 @@ public sealed class ClassDiagramService
         EnsureOutputDirectory(request.OutputPath);
 
         var outputs = new List<string>();
-        var splitDiagrams = CreateSplitDiagrams(request, splitOptions, displayTypes, relationships);
-        var overviewPath = CreateSiblingOutputPath(request.OutputPath, "all", ".mmd");
+        var splitDiagrams = CreateClassSplitDiagrams(request, options, displayTypes, relationships);
         var indexPath = CreateSiblingOutputPath(request.OutputPath, "index", ".md");
         var fallbackPath = CreateSiblingOutputPath(request.OutputPath, "empty", ".mmd");
 
-        if (splitOptions.IncludeOverview)
-        {
-            await File.WriteAllTextAsync(overviewPath, overviewMermaid, new UTF8Encoding(false), cancellationToken);
-            outputs.Add(overviewPath);
-        }
-
-        if (splitDiagrams.Count == 0 && !splitOptions.IncludeOverview && !splitOptions.IncludeIndex)
+        if (splitDiagrams.Count == 0 && !options.SplitOutput.IncludeIndex)
         {
             await File.WriteAllTextAsync(fallbackPath, overviewMermaid, new UTF8Encoding(false), cancellationToken);
             outputs.Add(fallbackPath);
@@ -934,58 +979,81 @@ public sealed class ClassDiagramService
             outputs.Add(diagram.Path);
         }
 
-        if (splitOptions.IncludeIndex)
+        if (options.SplitOutput.IncludeIndex)
         {
-            var index = RenderSplitIndex(indexPath, splitOptions, splitDiagrams, splitOptions.IncludeOverview ? overviewPath : null);
+            var index = RenderSplitIndex(indexPath, splitDiagrams);
             await File.WriteAllTextAsync(indexPath, index, new UTF8Encoding(false), cancellationToken);
             outputs.Insert(0, indexPath);
         }
 
-        var primaryPath = splitOptions.IncludeIndex
+        var primaryPath = options.SplitOutput.IncludeIndex
             ? indexPath
-            : splitOptions.IncludeOverview
-                ? overviewPath
-                : splitDiagrams.Count > 0
-                    ? splitDiagrams.First().Path
-                    : fallbackPath;
-        var previewMermaid = splitOptions.IncludeOverview || splitDiagrams.Count == 0
+            : splitDiagrams.Count > 0
+                ? splitDiagrams.First().Path
+                : fallbackPath;
+        var previewMermaid = splitDiagrams.Count == 0
             ? overviewMermaid
             : splitDiagrams.First().Mermaid;
 
         return new GeneratedOutput(primaryPath, previewMermaid, outputs);
     }
 
-    private static IReadOnlyList<SplitDiagram> CreateSplitDiagrams(
+    private static async Task<GeneratedOutput> WriteExcelOutputAsync(
         NormalizedGenerationRequest request,
-        DiagramSplitOptions splitOptions,
+        DiagramGenerationOptions options,
+        IReadOnlyList<DiagramType> displayTypes,
+        IReadOnlyList<DiagramRelationship> relationships,
+        string mermaid,
+        CancellationToken cancellationToken)
+    {
+        EnsureOutputDirectory(request.OutputPath);
+
+        var sheets = options.SplitOutput.Enabled
+            ? CreateClassSplitDiagrams(request, options, displayTypes, relationships)
+                .Select(diagram => new ExcelDiagramSheet(diagram.Name, diagram.Types, diagram.Relationships))
+                .ToArray()
+            : new[]
+            {
+                new ExcelDiagramSheet("ClassDiagram", displayTypes, relationships)
+            };
+
+        await ExcelRenderer.WriteAsync(request.OutputPath, sheets, cancellationToken);
+        return new GeneratedOutput(request.OutputPath, mermaid, new[] { request.OutputPath });
+    }
+
+    private static IReadOnlyList<SplitDiagram> CreateClassSplitDiagrams(
+        NormalizedGenerationRequest request,
+        DiagramGenerationOptions options,
         IReadOnlyList<DiagramType> displayTypes,
         IReadOnlyList<DiagramRelationship> relationships)
     {
-        var groups = displayTypes
-            .GroupBy(type => GetSplitGroupName(type, request.ProjectFolder, splitOptions.Mode), StringComparer.Ordinal)
-            .OrderBy(group => group.Key, StringComparer.Ordinal)
-            .ToArray();
         var usedSuffixes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var diagrams = new List<SplitDiagram>();
 
-        foreach (var group in groups)
+        foreach (var rootType in displayTypes.OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
-            var groupTypes = group
-                .OrderBy(type => type.FullName, StringComparer.Ordinal)
-                .ToArray();
-            var typeIds = groupTypes.Select(type => type.Id).ToHashSet(StringComparer.Ordinal);
-            var groupRelationships = relationships
-                .Where(relationship => typeIds.Contains(relationship.FromTypeId) && typeIds.Contains(relationship.ToTypeId))
-                .ToArray();
-            var fileSuffix = CreateUniqueFileSuffix(SanitizeFileSuffix(group.Key), usedSuffixes);
+            var selectedTypeIds = new HashSet<string>(StringComparer.Ordinal) { rootType.Id };
+            var groupTypes = options.RelatedTypes.Enabled
+                ? SelectRelatedTypes(displayTypes, relationships, selectedTypeIds, options.RelatedTypes)
+                : displayTypes
+                    .Where(type => string.Equals(type.Id, rootType.Id, StringComparison.Ordinal))
+                    .ToList();
+            if (options.RelatedTypes.ShowReferencedMembersOnly)
+            {
+                groupTypes = ApplyReferencedMemberFilter(groupTypes, selectedTypeIds);
+            }
+
+            var groupRelationships = FilterRelationships(relationships, groupTypes);
+            var fileSuffix = CreateUniqueFileSuffix(SanitizeFileSuffix(rootType.FullName), usedSuffixes);
             var path = CreateSiblingOutputPath(request.OutputPath, fileSuffix, ".mmd");
+            var mermaid = MermaidRenderer.Render(groupTypes, groupRelationships);
 
             diagrams.Add(new SplitDiagram(
-                group.Key,
+                rootType.FullName,
                 path,
-                MermaidRenderer.Render(groupTypes, groupRelationships),
-                groupTypes.Length,
-                groupRelationships.Length));
+                mermaid,
+                groupTypes,
+                groupRelationships));
         }
 
         return diagrams;
@@ -1025,20 +1093,13 @@ public sealed class ClassDiagramService
 
     private static string RenderSplitIndex(
         string indexPath,
-        DiagramSplitOptions splitOptions,
-        IReadOnlyList<SplitDiagram> splitDiagrams,
-        string? overviewPath)
+        IReadOnlyList<SplitDiagram> splitDiagrams)
     {
         var builder = new StringBuilder();
         builder.AppendLine("# Class Diagram Index");
         builder.AppendLine();
-        builder.AppendLine($"Split mode: `{splitOptions.Mode}`");
+        builder.AppendLine("Split mode: `Class`");
         builder.AppendLine();
-
-        if (!string.IsNullOrWhiteSpace(overviewPath))
-        {
-            builder.AppendLine($"- [All]({ToMarkdownLinkTarget(indexPath, overviewPath)})");
-        }
 
         foreach (var diagram in splitDiagrams)
         {
@@ -1152,8 +1213,13 @@ public sealed class ClassDiagramService
         string Name,
         string Path,
         string Mermaid,
-        int TypeCount,
-        int RelationshipCount);
+        IReadOnlyList<DiagramType> Types,
+        IReadOnlyList<DiagramRelationship> Relationships)
+    {
+        public int TypeCount => Types.Count;
+
+        public int RelationshipCount => Relationships.Count;
+    }
 }
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
@@ -1244,6 +1310,294 @@ public sealed record DiagramDependency
 
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
+mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/ExcelRenderer.cs")"
+cat > "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/ExcelRenderer.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
+
+namespace ClassDiagramMaker.Analysis;
+
+internal sealed record ExcelDiagramSheet(
+    string Name,
+    IReadOnlyList<DiagramType> Types,
+    IReadOnlyList<DiagramRelationship> Relationships);
+
+internal static class ExcelRenderer
+{
+    public static Task WriteAsync(
+        string outputPath,
+        IReadOnlyList<ExcelDiagramSheet> sheets,
+        CancellationToken cancellationToken)
+    {
+        var outputSheets = sheets.Count == 0
+            ? new[] { new ExcelDiagramSheet("ClassDiagram", Array.Empty<DiagramType>(), Array.Empty<DiagramRelationship>()) }
+            : sheets;
+        var usedNames = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        using var document = SpreadsheetDocument.Create(outputPath, SpreadsheetDocumentType.Workbook);
+        var workbookPart = document.AddWorkbookPart();
+        workbookPart.Workbook = new Workbook();
+        var workbookSheets = workbookPart.Workbook.AppendChild(new Sheets());
+
+        uint sheetId = 1;
+        foreach (var sheet in outputSheets)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+            worksheetPart.Worksheet = CreateWorksheet(sheet);
+
+            workbookSheets.Append(new Sheet
+            {
+                Id = workbookPart.GetIdOfPart(worksheetPart),
+                SheetId = sheetId++,
+                Name = CreateUniqueSheetName(sheet.Name, usedNames)
+            });
+        }
+
+        workbookPart.Workbook.Save();
+        return Task.CompletedTask;
+    }
+
+    private static Worksheet CreateWorksheet(ExcelDiagramSheet sheet)
+    {
+        var sheetData = new SheetData();
+
+        AppendRow(sheetData, "Class Diagram", sheet.Name);
+        AppendRow(sheetData);
+        AppendRow(sheetData, "Diagram");
+
+        foreach (var type in sheet.Types.OrderBy(type => type.FullName, StringComparer.Ordinal))
+        {
+            AppendRow(sheetData, type.DisplayName, type.Kind.ToString(), type.Accessibility, string.Join(" ", type.Modifiers));
+            foreach (var stereotype in GetStereotypes(type))
+            {
+                AppendRow(sheetData, string.Empty, $"<<{stereotype}>>");
+            }
+
+            foreach (var constraint in type.TypeParameterConstraints)
+            {
+                AppendRow(sheetData, string.Empty, constraint);
+            }
+
+            foreach (var member in type.Members)
+            {
+                AppendRow(sheetData, string.Empty, member.Visibility, member.Kind.ToString(), member.Type, member.Name, member.Signature);
+            }
+
+            AppendRow(sheetData);
+        }
+
+        AppendTable(
+            sheetData,
+            "Types",
+            new[] { "Id", "FullName", "Namespace", "Kind", "Accessibility", "Modifiers", "SourceFile" },
+            sheet.Types
+                .OrderBy(type => type.FullName, StringComparer.Ordinal)
+                .Select(type => new[]
+                {
+                    type.Id,
+                    type.FullName,
+                    type.Namespace,
+                    type.Kind.ToString(),
+                    type.Accessibility,
+                    string.Join(" ", type.Modifiers),
+                    type.SourceFile
+                }));
+
+        AppendTable(
+            sheetData,
+            "Members",
+            new[] { "Type", "Kind", "Visibility", "MemberType", "Name", "Signature" },
+            sheet.Types
+                .OrderBy(type => type.FullName, StringComparer.Ordinal)
+                .SelectMany(type => type.Members.Select(member => new[]
+                {
+                    type.FullName,
+                    member.Kind.ToString(),
+                    member.Visibility,
+                    member.Type,
+                    member.Name,
+                    member.Signature
+                })));
+
+        var typesById = sheet.Types.ToDictionary(type => type.Id, StringComparer.Ordinal);
+        AppendTable(
+            sheetData,
+            "Relationships",
+            new[] { "Kind", "From", "To", "Label", "Mermaid" },
+            sheet.Relationships
+                .OrderBy(relationship => relationship.FromTypeId, StringComparer.Ordinal)
+                .ThenBy(relationship => relationship.ToTypeId, StringComparer.Ordinal)
+                .ThenBy(relationship => relationship.Kind)
+                .Select(relationship => new[]
+                {
+                    relationship.Kind.ToString(),
+                    GetTypeName(typesById, relationship.FromTypeId),
+                    GetTypeName(typesById, relationship.ToTypeId),
+                    relationship.Label ?? string.Empty,
+                    FormatRelationship(typesById, relationship)
+                }));
+
+        AppendRow(sheetData, "Mermaid");
+        AppendRow(sheetData, MermaidRenderer.Render(sheet.Types, sheet.Relationships));
+
+        var columns = new Columns(
+            new Column { Min = 1, Max = 1, Width = 28, CustomWidth = true },
+            new Column { Min = 2, Max = 2, Width = 32, CustomWidth = true },
+            new Column { Min = 3, Max = 3, Width = 20, CustomWidth = true },
+            new Column { Min = 4, Max = 4, Width = 24, CustomWidth = true },
+            new Column { Min = 5, Max = 5, Width = 28, CustomWidth = true },
+            new Column { Min = 6, Max = 6, Width = 64, CustomWidth = true });
+
+        return new Worksheet(columns, sheetData);
+    }
+
+    private static void AppendTable(
+        SheetData sheetData,
+        string title,
+        IReadOnlyList<string> headers,
+        IEnumerable<IReadOnlyList<string>> rows)
+    {
+        AppendRow(sheetData);
+        AppendRow(sheetData, title);
+        AppendRow(sheetData, headers);
+        foreach (var row in rows)
+        {
+            AppendRow(sheetData, row);
+        }
+    }
+
+    private static void AppendRow(SheetData sheetData, params string[] values)
+    {
+        AppendRow(sheetData, (IReadOnlyList<string>)values);
+    }
+
+    private static void AppendRow(SheetData sheetData, IReadOnlyList<string> values)
+    {
+        sheetData.AppendChild(new Row(values.Select(CreateTextCell)));
+    }
+
+    private static Cell CreateTextCell(string value)
+    {
+        return new Cell
+        {
+            DataType = CellValues.InlineString,
+            InlineString = new InlineString(new Text(value ?? string.Empty))
+        };
+    }
+
+    private static IReadOnlyList<string> GetStereotypes(DiagramType type)
+    {
+        var stereotypes = new List<string>();
+        var kindStereotype = type.Kind switch
+        {
+            DiagramTypeKind.Interface => "interface",
+            DiagramTypeKind.Struct => "struct",
+            DiagramTypeKind.Record => "record",
+            DiagramTypeKind.Enum => "enumeration",
+            DiagramTypeKind.RazorPage => "razor page",
+            DiagramTypeKind.Delegate => "delegate",
+            _ => string.Empty
+        };
+
+        if (!string.IsNullOrWhiteSpace(kindStereotype))
+        {
+            stereotypes.Add(kindStereotype);
+        }
+
+        stereotypes.AddRange(type.Modifiers);
+        return stereotypes;
+    }
+
+    private static string FormatRelationship(
+        IReadOnlyDictionary<string, DiagramType> typesById,
+        DiagramRelationship relationship)
+    {
+        var from = GetSimpleTypeName(typesById, relationship.FromTypeId);
+        var to = GetSimpleTypeName(typesById, relationship.ToTypeId);
+        var label = string.IsNullOrWhiteSpace(relationship.Label)
+            ? string.Empty
+            : $" : {relationship.Label}";
+
+        return relationship.Kind switch
+        {
+            DiagramRelationshipKind.Inheritance => $"{to} <|-- {from}",
+            DiagramRelationshipKind.Realization => $"{to} <|.. {from}",
+            DiagramRelationshipKind.Association => $"{from} --> {to}{label}",
+            DiagramRelationshipKind.Dependency => $"{from} ..> {to}{label}",
+            _ => throw new ArgumentOutOfRangeException(nameof(relationship))
+        };
+    }
+
+    private static string GetTypeName(
+        IReadOnlyDictionary<string, DiagramType> typesById,
+        string typeId)
+    {
+        return typesById.TryGetValue(typeId, out var type)
+            ? type.FullName
+            : typeId;
+    }
+
+    private static string GetSimpleTypeName(
+        IReadOnlyDictionary<string, DiagramType> typesById,
+        string typeId)
+    {
+        return typesById.TryGetValue(typeId, out var type)
+            ? type.SimpleName
+            : typeId;
+    }
+
+    private static string CreateUniqueSheetName(
+        string preferredName,
+        Dictionary<string, int> usedNames)
+    {
+        var sanitized = SanitizeSheetName(preferredName);
+        var candidate = TruncateSheetName(sanitized);
+        if (!usedNames.TryGetValue(candidate, out var count))
+        {
+            usedNames[candidate] = 1;
+            return candidate;
+        }
+
+        while (true)
+        {
+            count++;
+            var suffix = $"_{count}";
+            candidate = $"{TruncateSheetName(sanitized, 31 - suffix.Length)}{suffix}";
+            if (!usedNames.ContainsKey(candidate))
+            {
+                usedNames[TruncateSheetName(sanitized)] = count;
+                usedNames[candidate] = 1;
+                return candidate;
+            }
+        }
+    }
+
+    private static string SanitizeSheetName(string value)
+    {
+        var invalidCharacters = new HashSet<char> { ':', '\\', '/', '?', '*', '[', ']' };
+        var sanitized = new string(value
+            .Split('.')
+            .Last()
+            .Select(character => invalidCharacters.Contains(character) ? '_' : character)
+            .ToArray())
+            .Trim('\'', ' ');
+
+        return string.IsNullOrWhiteSpace(sanitized) ? "ClassDiagram" : sanitized;
+    }
+
+    private static string TruncateSheetName(string value, int maxLength = 31)
+    {
+        return value.Length <= maxLength
+            ? value
+            : value[..maxLength];
+    }
+}
+
+__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
+
 mkdir -p "$(dirname "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/GenerationContracts.cs")"
 cat > "$TARGET_DIR/src/ClassDiagramMaker.Core/Analysis/GenerationContracts.cs" <<'__CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__'
 namespace ClassDiagramMaker.Analysis;
@@ -1264,12 +1618,19 @@ public enum DiagramDisplayMode
     AllMembers
 }
 
+public enum DiagramOutputFormat
+{
+    Mermaid,
+    Excel
+}
+
 public sealed record DiagramGenerationOptions(
     DiagramDisplayMode DisplayMode = DiagramDisplayMode.AllMembers,
     bool IncludeInheritance = true,
     bool IncludeRealization = true,
     bool IncludeAssociation = true,
-    bool IncludeDependency = true)
+    bool IncludeDependency = true,
+    DiagramOutputFormat OutputFormat = DiagramOutputFormat.Mermaid)
 {
     public static DiagramGenerationOptions Default { get; } = new();
 
@@ -3387,6 +3748,7 @@ public sealed class MainForm : Form
     private readonly TextBox _searchFolderTextBox = new();
     private readonly TextBox _searchFileTextBox = new();
     private readonly TextBox _outputPathTextBox = new();
+    private readonly ComboBox _outputFormatComboBox = new();
     private readonly ComboBox _displayModeComboBox = new();
     private readonly CheckBox _includeInheritanceCheckBox = new();
     private readonly CheckBox _includeRealizationCheckBox = new();
@@ -3525,6 +3887,25 @@ public sealed class MainForm : Form
             panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         }
 
+        var outputFormatLabel = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "出力形式"
+        };
+
+        _outputFormatComboBox.Dock = DockStyle.Left;
+        _outputFormatComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _outputFormatComboBox.Width = 220;
+        _outputFormatComboBox.Items.AddRange(new object[]
+        {
+            "Mermaid (.mmd)",
+            "Excel (.xlsx)"
+        });
+        _outputFormatComboBox.SelectedIndex = 0;
+        _outputFormatComboBox.SelectedIndexChanged += (_, _) => UpdateOutputFormatState();
+
         var displayLabel = new Label
         {
             AutoSize = true,
@@ -3625,30 +4006,12 @@ public sealed class MainForm : Form
         ConfigureRelationshipCheckBox(_splitOutputCheckBox, "分割して出力", checkedByDefault: false);
         _splitOutputCheckBox.CheckedChanged += (_, _) => UpdateSplitOptionState();
 
-        var splitModeLabel = new Label
-        {
-            AutoSize = true,
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Text = "分割単位"
-        };
-
-        _splitModeComboBox.Dock = DockStyle.Left;
-        _splitModeComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
-        _splitModeComboBox.Width = 220;
-        _splitModeComboBox.Items.AddRange(new object[]
-        {
-            "namespace",
-            "フォルダ"
-        });
-        _splitModeComboBox.SelectedIndex = 0;
-
         var splitFileLabel = new Label
         {
             AutoSize = true,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
-            Text = "分割ファイル"
+            Text = "分割補助"
         };
 
         var splitFilePanel = new FlowLayoutPanel
@@ -3659,22 +4022,20 @@ public sealed class MainForm : Form
             WrapContents = true
         };
 
-        ConfigureRelationshipCheckBox(_includeSplitOverviewCheckBox, "全体図も出力", checkedByDefault: true);
         ConfigureRelationshipCheckBox(_includeSplitIndexCheckBox, "index.md を出力", checkedByDefault: true);
 
-        splitFilePanel.Controls.Add(_includeSplitOverviewCheckBox);
         splitFilePanel.Controls.Add(_includeSplitIndexCheckBox);
 
-        panel.Controls.Add(displayLabel, 0, 0);
-        panel.Controls.Add(_displayModeComboBox, 1, 0);
-        panel.Controls.Add(relationshipLabel, 0, 1);
-        panel.Controls.Add(relationshipPanel, 1, 1);
-        panel.Controls.Add(relatedLabel, 0, 2);
-        panel.Controls.Add(relatedPanel, 1, 2);
-        panel.Controls.Add(splitLabel, 0, 3);
-        panel.Controls.Add(_splitOutputCheckBox, 1, 3);
-        panel.Controls.Add(splitModeLabel, 0, 4);
-        panel.Controls.Add(_splitModeComboBox, 1, 4);
+        panel.Controls.Add(outputFormatLabel, 0, 0);
+        panel.Controls.Add(_outputFormatComboBox, 1, 0);
+        panel.Controls.Add(displayLabel, 0, 1);
+        panel.Controls.Add(_displayModeComboBox, 1, 1);
+        panel.Controls.Add(relationshipLabel, 0, 2);
+        panel.Controls.Add(relationshipPanel, 1, 2);
+        panel.Controls.Add(relatedLabel, 0, 3);
+        panel.Controls.Add(relatedPanel, 1, 3);
+        panel.Controls.Add(splitLabel, 0, 4);
+        panel.Controls.Add(_splitOutputCheckBox, 1, 4);
         panel.Controls.Add(splitFileLabel, 0, 5);
         panel.Controls.Add(splitFilePanel, 1, 5);
 
@@ -3953,11 +4314,14 @@ public sealed class MainForm : Form
 
     private void BrowseOutputPath(object? sender, EventArgs e)
     {
+        var outputFormat = GetSelectedOutputFormat();
         using var dialog = new SaveFileDialog
         {
             Title = "出力先を選択",
-            Filter = "Mermaid files (*.mmd)|*.mmd|Markdown files (*.md)|*.md|All files (*.*)|*.*",
-            DefaultExt = "mmd",
+            Filter = outputFormat == DiagramOutputFormat.Excel
+                ? "Excel files (*.xlsx)|*.xlsx|All files (*.*)|*.*"
+                : "Mermaid files (*.mmd)|*.mmd|All files (*.*)|*.*",
+            DefaultExt = outputFormat == DiagramOutputFormat.Excel ? "xlsx" : "mmd",
             OverwritePrompt = true
         };
 
@@ -4023,7 +4387,7 @@ public sealed class MainForm : Form
         _generationCancellation = new CancellationTokenSource();
         SetRunning(true);
         ResetProgress();
-        AppendLog("Generating Mermaid class diagram...");
+        AppendLog("Generating class diagram...");
 
         try
         {
@@ -4033,7 +4397,7 @@ public sealed class MainForm : Form
 
             _mermaidTextBox.Text = result.Mermaid;
             _outputLabel.Text = result.OutputPaths.Count > 1
-                ? $"出力: {result.OutputPath} ({result.OutputPaths.Count} files)"
+                ? $"出力: {result.OutputPath} ({result.OutputPaths.Count} outputs)"
                 : $"出力: {result.OutputPath}";
             _stageLabel.Text = "完了";
             _messageLabel.Text = $"生成完了: {result.TypeCount} types, {result.RelationshipCount} relationships";
@@ -4075,6 +4439,7 @@ public sealed class MainForm : Form
         var searchFolder = _searchFolderTextBox.Text.Trim();
         var searchFile = _searchFileTextBox.Text.Trim();
         var outputPath = _outputPathTextBox.Text.Trim();
+        var outputFormat = GetSelectedOutputFormat();
 
         if (string.IsNullOrWhiteSpace(projectFile))
         {
@@ -4097,6 +4462,8 @@ public sealed class MainForm : Form
             return false;
         }
 
+        outputPath = EnsureOutputExtension(outputPath, outputFormat);
+
         request = new GenerationRequest(
             projectFile,
             searchFolder,
@@ -4108,13 +4475,13 @@ public sealed class MainForm : Form
                 IncludeInheritance: _includeInheritanceCheckBox.Checked,
                 IncludeRealization: _includeRealizationCheckBox.Checked,
                 IncludeAssociation: _includeAssociationCheckBox.Checked,
-                IncludeDependency: _includeDependencyCheckBox.Checked)
+                IncludeDependency: _includeDependencyCheckBox.Checked,
+                OutputFormat: outputFormat)
             {
                 SplitOutput = new DiagramSplitOptions(
                     Enabled: _splitOutputCheckBox.Checked,
-                    Mode: GetSelectedSplitMode(),
-                    IncludeOverview: _includeSplitOverviewCheckBox.Checked,
-                    IncludeIndex: _includeSplitIndexCheckBox.Checked),
+                    IncludeOverview: false,
+                    IncludeIndex: outputFormat == DiagramOutputFormat.Mermaid && _includeSplitIndexCheckBox.Checked),
                 RelatedTypes = new RelatedTypeOptions(
                     Enabled: _includeRelatedTypesCheckBox.Checked,
                     Depth: (int)_relatedDepthNumericUpDown.Value,
@@ -4123,6 +4490,15 @@ public sealed class MainForm : Form
             }
         };
         return true;
+    }
+
+    private DiagramOutputFormat GetSelectedOutputFormat()
+    {
+        return _outputFormatComboBox.SelectedIndex switch
+        {
+            1 => DiagramOutputFormat.Excel,
+            _ => DiagramOutputFormat.Mermaid
+        };
     }
 
     private DiagramDisplayMode GetSelectedDisplayMode()
@@ -4135,21 +4511,24 @@ public sealed class MainForm : Form
         };
     }
 
-    private DiagramSplitMode GetSelectedSplitMode()
+    private static string EnsureOutputExtension(string outputPath, DiagramOutputFormat outputFormat)
     {
-        return _splitModeComboBox.SelectedIndex switch
+        var expectedExtension = outputFormat == DiagramOutputFormat.Excel ? ".xlsx" : ".mmd";
+        var currentExtension = Path.GetExtension(outputPath);
+        if (string.IsNullOrWhiteSpace(currentExtension))
         {
-            1 => DiagramSplitMode.Folder,
-            _ => DiagramSplitMode.Namespace
-        };
+            return $"{outputPath}{expectedExtension}";
+        }
+
+        return string.Equals(currentExtension, expectedExtension, StringComparison.OrdinalIgnoreCase)
+            ? outputPath
+            : Path.ChangeExtension(outputPath, expectedExtension);
     }
 
     private void UpdateSplitOptionState()
     {
         var enabled = _splitOutputCheckBox.Checked;
-        _splitModeComboBox.Enabled = enabled;
-        _includeSplitOverviewCheckBox.Enabled = enabled;
-        _includeSplitIndexCheckBox.Enabled = enabled;
+        _includeSplitIndexCheckBox.Enabled = enabled && GetSelectedOutputFormat() == DiagramOutputFormat.Mermaid;
     }
 
     private void UpdateRelatedOptionState()
@@ -4158,6 +4537,11 @@ public sealed class MainForm : Form
         _unlimitedRelatedDepthCheckBox.Enabled = enabled;
         _relatedDepthNumericUpDown.Enabled = enabled && !_unlimitedRelatedDepthCheckBox.Checked;
         _showReferencedMembersOnlyCheckBox.Enabled = enabled;
+    }
+
+    private void UpdateOutputFormatState()
+    {
+        UpdateSplitOptionState();
     }
 
     private void ShowValidationError(string message)
@@ -4219,9 +4603,11 @@ FILES=(
   ".gitignore"
   "global.json"
   "README.md"
+  "THIRD-PARTY-NOTICES.md"
   "src/ClassDiagramMaker.Core/ClassDiagramMaker.Core.csproj"
   "src/ClassDiagramMaker.Core/Analysis/ClassDiagramService.cs"
   "src/ClassDiagramMaker.Core/Analysis/DiagramModel.cs"
+  "src/ClassDiagramMaker.Core/Analysis/ExcelRenderer.cs"
   "src/ClassDiagramMaker.Core/Analysis/GenerationContracts.cs"
   "src/ClassDiagramMaker.Core/Analysis/MermaidRenderer.cs"
   "src/ClassDiagramMaker.Core/Analysis/RazorPageCollector.cs"
@@ -4329,5 +4715,5 @@ Write-Host (Join-Path $output "ClassDiagramMaker.exe")
 __CLASSDIAGRAMMAKER_BOOTSTRAP_FILE__
 
 chmod +x "$TARGET_DIR/tools/generate-bootstrap.sh"
-echo "Created ClassDiagramMaker source at $TARGET_DIR (18 files)"
+echo "Created ClassDiagramMaker source at $TARGET_DIR (20 files)"
 echo "Run on Windows: cd $TARGET_DIR && dotnet run --project src/ClassDiagramMaker/ClassDiagramMaker.csproj"

@@ -133,9 +133,14 @@ public sealed class ClassDiagramService
 
         var displayTypes = ApplyDisplayMode(types, request.Options.DisplayMode);
         var mermaid = MermaidRenderer.Render(displayTypes, relationships);
-        var output = request.Options.SplitOutput.Enabled
-            ? await WriteSplitOutputAsync(options, request.Options.SplitOutput, displayTypes, relationships, mermaid, cancellationToken)
-            : await WriteSingleOutputAsync(options.OutputPath, mermaid, cancellationToken);
+        var output = request.Options.OutputFormat switch
+        {
+            DiagramOutputFormat.Mermaid => request.Options.SplitOutput.Enabled
+                ? await WriteSplitOutputAsync(options, request.Options, displayTypes, relationships, mermaid, cancellationToken)
+                : await WriteSingleOutputAsync(options.OutputPath, mermaid, cancellationToken),
+            DiagramOutputFormat.Excel => await WriteExcelOutputAsync(options, request.Options, displayTypes, relationships, mermaid, cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(nameof(request.Options.OutputFormat), request.Options.OutputFormat, null)
+        };
 
         progress.Report(new GenerationProgress(
             "Writing",
@@ -646,7 +651,7 @@ public sealed class ClassDiagramService
 
     private static async Task<GeneratedOutput> WriteSplitOutputAsync(
         NormalizedGenerationRequest request,
-        DiagramSplitOptions splitOptions,
+        DiagramGenerationOptions options,
         IReadOnlyList<DiagramType> displayTypes,
         IReadOnlyList<DiagramRelationship> relationships,
         string overviewMermaid,
@@ -655,18 +660,11 @@ public sealed class ClassDiagramService
         EnsureOutputDirectory(request.OutputPath);
 
         var outputs = new List<string>();
-        var splitDiagrams = CreateSplitDiagrams(request, splitOptions, displayTypes, relationships);
-        var overviewPath = CreateSiblingOutputPath(request.OutputPath, "all", ".mmd");
+        var splitDiagrams = CreateClassSplitDiagrams(request, options, displayTypes, relationships);
         var indexPath = CreateSiblingOutputPath(request.OutputPath, "index", ".md");
         var fallbackPath = CreateSiblingOutputPath(request.OutputPath, "empty", ".mmd");
 
-        if (splitOptions.IncludeOverview)
-        {
-            await File.WriteAllTextAsync(overviewPath, overviewMermaid, new UTF8Encoding(false), cancellationToken);
-            outputs.Add(overviewPath);
-        }
-
-        if (splitDiagrams.Count == 0 && !splitOptions.IncludeOverview && !splitOptions.IncludeIndex)
+        if (splitDiagrams.Count == 0 && !options.SplitOutput.IncludeIndex)
         {
             await File.WriteAllTextAsync(fallbackPath, overviewMermaid, new UTF8Encoding(false), cancellationToken);
             outputs.Add(fallbackPath);
@@ -678,58 +676,81 @@ public sealed class ClassDiagramService
             outputs.Add(diagram.Path);
         }
 
-        if (splitOptions.IncludeIndex)
+        if (options.SplitOutput.IncludeIndex)
         {
-            var index = RenderSplitIndex(indexPath, splitOptions, splitDiagrams, splitOptions.IncludeOverview ? overviewPath : null);
+            var index = RenderSplitIndex(indexPath, splitDiagrams);
             await File.WriteAllTextAsync(indexPath, index, new UTF8Encoding(false), cancellationToken);
             outputs.Insert(0, indexPath);
         }
 
-        var primaryPath = splitOptions.IncludeIndex
+        var primaryPath = options.SplitOutput.IncludeIndex
             ? indexPath
-            : splitOptions.IncludeOverview
-                ? overviewPath
-                : splitDiagrams.Count > 0
-                    ? splitDiagrams.First().Path
-                    : fallbackPath;
-        var previewMermaid = splitOptions.IncludeOverview || splitDiagrams.Count == 0
+            : splitDiagrams.Count > 0
+                ? splitDiagrams.First().Path
+                : fallbackPath;
+        var previewMermaid = splitDiagrams.Count == 0
             ? overviewMermaid
             : splitDiagrams.First().Mermaid;
 
         return new GeneratedOutput(primaryPath, previewMermaid, outputs);
     }
 
-    private static IReadOnlyList<SplitDiagram> CreateSplitDiagrams(
+    private static async Task<GeneratedOutput> WriteExcelOutputAsync(
         NormalizedGenerationRequest request,
-        DiagramSplitOptions splitOptions,
+        DiagramGenerationOptions options,
+        IReadOnlyList<DiagramType> displayTypes,
+        IReadOnlyList<DiagramRelationship> relationships,
+        string mermaid,
+        CancellationToken cancellationToken)
+    {
+        EnsureOutputDirectory(request.OutputPath);
+
+        var sheets = options.SplitOutput.Enabled
+            ? CreateClassSplitDiagrams(request, options, displayTypes, relationships)
+                .Select(diagram => new ExcelDiagramSheet(diagram.Name, diagram.Types, diagram.Relationships))
+                .ToArray()
+            : new[]
+            {
+                new ExcelDiagramSheet("ClassDiagram", displayTypes, relationships)
+            };
+
+        await ExcelRenderer.WriteAsync(request.OutputPath, sheets, cancellationToken);
+        return new GeneratedOutput(request.OutputPath, mermaid, new[] { request.OutputPath });
+    }
+
+    private static IReadOnlyList<SplitDiagram> CreateClassSplitDiagrams(
+        NormalizedGenerationRequest request,
+        DiagramGenerationOptions options,
         IReadOnlyList<DiagramType> displayTypes,
         IReadOnlyList<DiagramRelationship> relationships)
     {
-        var groups = displayTypes
-            .GroupBy(type => GetSplitGroupName(type, request.ProjectFolder, splitOptions.Mode), StringComparer.Ordinal)
-            .OrderBy(group => group.Key, StringComparer.Ordinal)
-            .ToArray();
         var usedSuffixes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var diagrams = new List<SplitDiagram>();
 
-        foreach (var group in groups)
+        foreach (var rootType in displayTypes.OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
-            var groupTypes = group
-                .OrderBy(type => type.FullName, StringComparer.Ordinal)
-                .ToArray();
-            var typeIds = groupTypes.Select(type => type.Id).ToHashSet(StringComparer.Ordinal);
-            var groupRelationships = relationships
-                .Where(relationship => typeIds.Contains(relationship.FromTypeId) && typeIds.Contains(relationship.ToTypeId))
-                .ToArray();
-            var fileSuffix = CreateUniqueFileSuffix(SanitizeFileSuffix(group.Key), usedSuffixes);
+            var selectedTypeIds = new HashSet<string>(StringComparer.Ordinal) { rootType.Id };
+            var groupTypes = options.RelatedTypes.Enabled
+                ? SelectRelatedTypes(displayTypes, relationships, selectedTypeIds, options.RelatedTypes)
+                : displayTypes
+                    .Where(type => string.Equals(type.Id, rootType.Id, StringComparison.Ordinal))
+                    .ToList();
+            if (options.RelatedTypes.ShowReferencedMembersOnly)
+            {
+                groupTypes = ApplyReferencedMemberFilter(groupTypes, selectedTypeIds);
+            }
+
+            var groupRelationships = FilterRelationships(relationships, groupTypes);
+            var fileSuffix = CreateUniqueFileSuffix(SanitizeFileSuffix(rootType.FullName), usedSuffixes);
             var path = CreateSiblingOutputPath(request.OutputPath, fileSuffix, ".mmd");
+            var mermaid = MermaidRenderer.Render(groupTypes, groupRelationships);
 
             diagrams.Add(new SplitDiagram(
-                group.Key,
+                rootType.FullName,
                 path,
-                MermaidRenderer.Render(groupTypes, groupRelationships),
-                groupTypes.Length,
-                groupRelationships.Length));
+                mermaid,
+                groupTypes,
+                groupRelationships));
         }
 
         return diagrams;
@@ -769,20 +790,13 @@ public sealed class ClassDiagramService
 
     private static string RenderSplitIndex(
         string indexPath,
-        DiagramSplitOptions splitOptions,
-        IReadOnlyList<SplitDiagram> splitDiagrams,
-        string? overviewPath)
+        IReadOnlyList<SplitDiagram> splitDiagrams)
     {
         var builder = new StringBuilder();
         builder.AppendLine("# Class Diagram Index");
         builder.AppendLine();
-        builder.AppendLine($"Split mode: `{splitOptions.Mode}`");
+        builder.AppendLine("Split mode: `Class`");
         builder.AppendLine();
-
-        if (!string.IsNullOrWhiteSpace(overviewPath))
-        {
-            builder.AppendLine($"- [All]({ToMarkdownLinkTarget(indexPath, overviewPath)})");
-        }
 
         foreach (var diagram in splitDiagrams)
         {
@@ -896,6 +910,11 @@ public sealed class ClassDiagramService
         string Name,
         string Path,
         string Mermaid,
-        int TypeCount,
-        int RelationshipCount);
+        IReadOnlyList<DiagramType> Types,
+        IReadOnlyList<DiagramRelationship> Relationships)
+    {
+        public int TypeCount => Types.Count;
+
+        public int RelationshipCount => Relationships.Count;
+    }
 }

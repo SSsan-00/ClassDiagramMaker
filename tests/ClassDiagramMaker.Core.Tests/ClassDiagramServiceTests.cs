@@ -1,4 +1,6 @@
 using ClassDiagramMaker.Analysis;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
 using Xunit;
 
 namespace ClassDiagramMaker.Core.Tests;
@@ -1201,7 +1203,7 @@ public sealed class ClassDiagramServiceTests
     }
 
     [Fact]
-    public async Task GenerateAsync_WhenSplitOutputByNamespace_WritesNamespaceDiagramsAndIndex()
+    public async Task GenerateAsync_WhenSplitOutputIsEnabled_WritesOneMermaidFilePerClassAndIndex()
     {
         using var workspace = TestWorkspace.Create();
         workspace.WriteSource(
@@ -1241,56 +1243,50 @@ public sealed class ClassDiagramServiceTests
                 {
                     SplitOutput = new DiagramSplitOptions(
                         Enabled: true,
-                        Mode: DiagramSplitMode.Namespace,
                         IncludeOverview: true,
-                        IncludeIndex: true)
+                        IncludeIndex: true),
+                    RelatedTypes = new RelatedTypeOptions(
+                        Enabled: true,
+                        Depth: 1)
                 }
             },
             new Progress<GenerationProgress>(),
             CancellationToken.None);
 
         var indexPath = workspace.GetOutputPath(".index.md");
-        var overviewPath = workspace.GetOutputPath(".all.mmd");
-        var servicesPath = workspace.GetOutputPath(".Demo.Services.mmd");
-        var modelsPath = workspace.GetOutputPath(".Demo.Models.mmd");
+        var userServicePath = workspace.GetOutputPath(".Demo.Services.UserService.mmd");
+        var userRepositoryPath = workspace.GetOutputPath(".Demo.Services.UserRepository.mmd");
+        var userDtoPath = workspace.GetOutputPath(".Demo.Models.UserDto.mmd");
+        var createUserCommandPath = workspace.GetOutputPath(".Demo.Models.CreateUserCommand.mmd");
 
         Assert.Equal(indexPath, result.OutputPath);
-        Assert.Contains(indexPath, result.OutputPaths);
-        Assert.Contains(overviewPath, result.OutputPaths);
-        Assert.Contains(servicesPath, result.OutputPaths);
-        Assert.Contains(modelsPath, result.OutputPaths);
+        Assert.Equal(
+            new[] { createUserCommandPath, indexPath, userDtoPath, userRepositoryPath, userServicePath }.OrderBy(path => path, StringComparer.Ordinal).ToArray(),
+            result.OutputPaths.OrderBy(path => path, StringComparer.Ordinal).ToArray());
+        Assert.False(File.Exists(workspace.GetOutputPath(".all.mmd")));
 
         var index = File.ReadAllText(indexPath);
-        Assert.Contains("[All](diagram.all.mmd)", index);
-        Assert.Contains("[Demo.Services](diagram.Demo.Services.mmd)", index);
-        Assert.Contains("[Demo.Models](diagram.Demo.Models.mmd)", index);
+        Assert.DoesNotContain("[All]", index);
+        Assert.Contains("[Demo.Services.UserService](diagram.Demo.Services.UserService.mmd)", index);
+        Assert.Contains("[Demo.Models.UserDto](diagram.Demo.Models.UserDto.mmd)", index);
 
-        var servicesDiagram = File.ReadAllText(servicesPath);
-        Assert.Contains("class Demo_Services_UserService", servicesDiagram);
-        Assert.Contains("class Demo_Services_UserRepository", servicesDiagram);
-        Assert.DoesNotContain("Demo_Models_UserDto", servicesDiagram);
-        Assert.Contains("Demo_Services_UserService --> Demo_Services_UserRepository : repository", servicesDiagram);
-        Assert.DoesNotContain("Demo_Services_UserService ..> Demo_Models_UserDto", servicesDiagram);
-
-        var overviewDiagram = File.ReadAllText(overviewPath);
-        Assert.Contains("class Demo_Models_UserDto", overviewDiagram);
-        Assert.Contains("Demo_Services_UserService ..> Demo_Models_UserDto : Create", overviewDiagram);
+        var userServiceDiagram = File.ReadAllText(userServicePath);
+        Assert.Contains("class Demo_Services_UserService", userServiceDiagram);
+        Assert.Contains("class Demo_Services_UserRepository", userServiceDiagram);
+        Assert.Contains("class Demo_Models_UserDto", userServiceDiagram);
+        Assert.Contains("class Demo_Models_CreateUserCommand", userServiceDiagram);
+        Assert.Contains("Demo_Services_UserService --> Demo_Services_UserRepository : repository", userServiceDiagram);
+        Assert.Contains("Demo_Services_UserService ..> Demo_Models_UserDto : Create", userServiceDiagram);
     }
 
-    [Fact]
-    public async Task GenerateAsync_WhenSplitOutputByFolder_WritesFolderDiagrams()
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    public async Task GenerateAsync_WhenSplitOutputIsEnabled_UsesRelatedDepthForEachClassFile(
+        int depth,
+        bool expectRelatedType)
     {
         using var workspace = TestWorkspace.Create();
-        workspace.WriteSource(
-            "Domain/User.cs",
-            """
-            namespace Demo.Domain;
-
-            public sealed class User
-            {
-                public string Name { get; }
-            }
-            """);
         workspace.WriteSource(
             "Application/UserService.cs",
             """
@@ -1301,6 +1297,16 @@ public sealed class ClassDiagramServiceTests
                 public Demo.Domain.User Find() => new();
             }
             """);
+        workspace.WriteSource(
+            "Domain/User.cs",
+            """
+            namespace Demo.Domain;
+
+            public sealed class User
+            {
+                public string Name { get; }
+            }
+            """);
 
         var result = await new ClassDiagramService().GenerateAsync(
             new GenerationRequest(workspace.Root, workspace.Root, null, workspace.OutputPath)
@@ -1309,30 +1315,28 @@ public sealed class ClassDiagramServiceTests
                 {
                     SplitOutput = new DiagramSplitOptions(
                         Enabled: true,
-                        Mode: DiagramSplitMode.Folder,
                         IncludeOverview: false,
-                        IncludeIndex: false)
+                        IncludeIndex: false),
+                    RelatedTypes = new RelatedTypeOptions(
+                        Enabled: true,
+                        Depth: depth)
                 }
             },
             new Progress<GenerationProgress>(),
             CancellationToken.None);
 
-        var domainPath = workspace.GetOutputPath(".Domain.mmd");
-        var applicationPath = workspace.GetOutputPath(".Application.mmd");
+        var servicePath = workspace.GetOutputPath(".Demo.Application.UserService.mmd");
+        var userPath = workspace.GetOutputPath(".Demo.Domain.User.mmd");
 
-        Assert.Equal(applicationPath, result.OutputPath);
-        Assert.Equal(new[] { applicationPath, domainPath }, result.OutputPaths);
+        Assert.Equal(servicePath, result.OutputPath);
+        Assert.Equal(new[] { servicePath, userPath }, result.OutputPaths);
         Assert.False(File.Exists(workspace.GetOutputPath(".index.md")));
         Assert.False(File.Exists(workspace.GetOutputPath(".all.mmd")));
 
-        var applicationDiagram = File.ReadAllText(applicationPath);
+        var applicationDiagram = File.ReadAllText(servicePath);
         Assert.Contains("class Demo_Application_UserService", applicationDiagram);
-        Assert.DoesNotContain("Demo_Domain_User", applicationDiagram);
-        Assert.DoesNotContain("Demo_Application_UserService ..> Demo_Domain_User", applicationDiagram);
-
-        var domainDiagram = File.ReadAllText(domainPath);
-        Assert.Contains("class Demo_Domain_User", domainDiagram);
-        Assert.Contains("+string Name", domainDiagram);
+        Assert.Equal(expectRelatedType, applicationDiagram.Contains("class Demo_Domain_User", StringComparison.Ordinal));
+        Assert.Equal(expectRelatedType, applicationDiagram.Contains("Demo_Application_UserService ..> Demo_Domain_User", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1357,7 +1361,6 @@ public sealed class ClassDiagramServiceTests
                 {
                     SplitOutput = new DiagramSplitOptions(
                         Enabled: true,
-                        Mode: DiagramSplitMode.Namespace,
                         IncludeOverview: false,
                         IncludeIndex: false)
                 }
@@ -1365,7 +1368,7 @@ public sealed class ClassDiagramServiceTests
             new Progress<GenerationProgress>(),
             CancellationToken.None);
 
-        var servicesDiagram = File.ReadAllText(workspace.GetOutputPath(".Demo.Services.mmd"));
+        var servicesDiagram = File.ReadAllText(workspace.GetOutputPath(".Demo.Services.UserService.mmd"));
         Assert.Contains("class Demo_Services_UserService", servicesDiagram);
         Assert.DoesNotContain("+string Name", servicesDiagram);
     }
@@ -1387,7 +1390,6 @@ public sealed class ClassDiagramServiceTests
                 {
                     SplitOutput = new DiagramSplitOptions(
                         Enabled: true,
-                        Mode: DiagramSplitMode.Namespace,
                         IncludeOverview: false,
                         IncludeIndex: false)
                 }
@@ -1399,6 +1401,154 @@ public sealed class ClassDiagramServiceTests
         Assert.Equal(emptyPath, result.OutputPath);
         Assert.Equal(new[] { emptyPath }, result.OutputPaths);
         Assert.Contains("classDiagram", File.ReadAllText(emptyPath));
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WhenExcelOutputIsSelected_WritesSingleSheetWorkbook()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Services/UserService.cs",
+            """
+            namespace Demo.Services;
+
+            public sealed class UserService
+            {
+                private readonly UserRepository repository;
+
+                public UserDto Create(CreateUserCommand command) => repository.Create(command);
+            }
+
+            public sealed class UserRepository
+            {
+                public UserDto Create(CreateUserCommand command) => new();
+            }
+
+            public sealed class UserDto
+            {
+            }
+
+            public sealed class CreateUserCommand
+            {
+            }
+            """);
+        var outputPath = workspace.GetOutputPath(".xlsx");
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, outputPath)
+            {
+                Options = new DiagramGenerationOptions
+                {
+                    OutputFormat = DiagramOutputFormat.Excel
+                }
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Equal(outputPath, result.OutputPath);
+        Assert.Equal(new[] { outputPath }, result.OutputPaths);
+        Assert.Equal(new[] { "ClassDiagram" }, GetWorksheetNames(outputPath));
+
+        var workbookText = ReadWorkbookText(outputPath);
+        Assert.Contains("Demo.Services.UserService", workbookText);
+        Assert.Contains("UserService --> UserRepository : repository", workbookText);
+        Assert.Contains("UserService ..> UserDto : Create", workbookText);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WhenExcelSplitOutputIsEnabled_WritesOneSheetPerClass()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Application/UserService.cs",
+            """
+            namespace Demo.Application;
+
+            public sealed class UserService
+            {
+                public Demo.Domain.User Find() => new();
+            }
+            """);
+        workspace.WriteSource(
+            "Domain/User.cs",
+            """
+            namespace Demo.Domain;
+
+            public sealed class User
+            {
+                public string Name { get; }
+            }
+            """);
+        var outputPath = workspace.GetOutputPath(".xlsx");
+
+        var result = await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, outputPath)
+            {
+                Options = new DiagramGenerationOptions
+                {
+                    OutputFormat = DiagramOutputFormat.Excel,
+                    SplitOutput = new DiagramSplitOptions(
+                        Enabled: true,
+                        IncludeIndex: false),
+                    RelatedTypes = new RelatedTypeOptions(
+                        Enabled: true,
+                        Depth: 1)
+                }
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Equal(outputPath, result.OutputPath);
+        Assert.Equal(new[] { outputPath }, result.OutputPaths);
+
+        var sheetNames = GetWorksheetNames(outputPath);
+        Assert.Equal(new[] { "User", "UserService" }, sheetNames.OrderBy(name => name, StringComparer.Ordinal).ToArray());
+
+        var workbookText = ReadWorkbookText(outputPath);
+        Assert.Contains("Demo.Application.UserService", workbookText);
+        Assert.Contains("Demo.Domain.User", workbookText);
+        Assert.Contains("UserService ..> User : Find", workbookText);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WhenExcelSplitOutputHasDuplicateSimpleNames_CreatesUniqueSheetNames()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Sales/User.cs",
+            """
+            namespace Demo.Sales;
+
+            public sealed class User
+            {
+            }
+            """);
+        workspace.WriteSource(
+            "Support/User.cs",
+            """
+            namespace Demo.Support;
+
+            public sealed class User
+            {
+            }
+            """);
+        var outputPath = workspace.GetOutputPath(".xlsx");
+
+        await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, outputPath)
+            {
+                Options = new DiagramGenerationOptions
+                {
+                    OutputFormat = DiagramOutputFormat.Excel,
+                    SplitOutput = new DiagramSplitOptions(
+                        Enabled: true,
+                        IncludeIndex: false)
+                }
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Equal(new[] { "User", "User_2" }, GetWorksheetNames(outputPath));
     }
 
     private static string GetClassBlock(string mermaid, string classId)
@@ -1425,6 +1575,52 @@ public sealed class ClassDiagramServiceTests
         }
 
         return string.Empty;
+    }
+
+    private static IReadOnlyList<string> GetWorksheetNames(string path)
+    {
+        using var document = SpreadsheetDocument.Open(path, false);
+        var workbook = document.WorkbookPart?.Workbook;
+        return (workbook?.Sheets ?? new Sheets())
+            .Elements<Sheet>()
+            .Select(sheet => sheet.Name?.Value ?? string.Empty)
+            .ToArray();
+    }
+
+    private static string ReadWorkbookText(string path)
+    {
+        using var document = SpreadsheetDocument.Open(path, false);
+        var workbookPart = document.WorkbookPart!;
+        return string.Join(
+            Environment.NewLine,
+            workbookPart.WorksheetParts
+                .SelectMany(part => part.Worksheet?.Descendants<Cell>() ?? Enumerable.Empty<Cell>())
+                .Select(cell => ReadCellText(cell, workbookPart))
+                .Where(value => !string.IsNullOrWhiteSpace(value)));
+    }
+
+    private static string ReadCellText(Cell cell, WorkbookPart workbookPart)
+    {
+        if (cell.DataType?.Value == CellValues.SharedString)
+        {
+            if (int.TryParse(cell.CellValue?.Text, out var sharedStringIndex))
+            {
+                var sharedStringTable = workbookPart.SharedStringTablePart?.SharedStringTable;
+                return sharedStringTable?
+                    .Elements<SharedStringItem>()
+                    .ElementAtOrDefault(sharedStringIndex)
+                    ?.InnerText ?? string.Empty;
+            }
+
+            return string.Empty;
+        }
+
+        if (cell.DataType?.Value == CellValues.InlineString)
+        {
+            return cell.InlineString?.InnerText ?? string.Empty;
+        }
+
+        return cell.CellValue?.Text ?? string.Empty;
     }
 
     private static void AssertClassBodyLinesDoNotContain(string mermaid, string unexpected)

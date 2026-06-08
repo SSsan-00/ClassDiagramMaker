@@ -13,6 +13,7 @@ public sealed class MainForm : Form
     private readonly TextBox _searchFolderTextBox = new();
     private readonly TextBox _searchFileTextBox = new();
     private readonly TextBox _outputPathTextBox = new();
+    private readonly ComboBox _outputFormatComboBox = new();
     private readonly ComboBox _displayModeComboBox = new();
     private readonly CheckBox _includeInheritanceCheckBox = new();
     private readonly CheckBox _includeRealizationCheckBox = new();
@@ -151,6 +152,25 @@ public sealed class MainForm : Form
             panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         }
 
+        var outputFormatLabel = new Label
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Text = "出力形式"
+        };
+
+        _outputFormatComboBox.Dock = DockStyle.Left;
+        _outputFormatComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _outputFormatComboBox.Width = 220;
+        _outputFormatComboBox.Items.AddRange(new object[]
+        {
+            "Mermaid (.mmd)",
+            "Excel (.xlsx)"
+        });
+        _outputFormatComboBox.SelectedIndex = 0;
+        _outputFormatComboBox.SelectedIndexChanged += (_, _) => UpdateOutputFormatState();
+
         var displayLabel = new Label
         {
             AutoSize = true,
@@ -251,30 +271,12 @@ public sealed class MainForm : Form
         ConfigureRelationshipCheckBox(_splitOutputCheckBox, "分割して出力", checkedByDefault: false);
         _splitOutputCheckBox.CheckedChanged += (_, _) => UpdateSplitOptionState();
 
-        var splitModeLabel = new Label
-        {
-            AutoSize = true,
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Text = "分割単位"
-        };
-
-        _splitModeComboBox.Dock = DockStyle.Left;
-        _splitModeComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
-        _splitModeComboBox.Width = 220;
-        _splitModeComboBox.Items.AddRange(new object[]
-        {
-            "namespace",
-            "フォルダ"
-        });
-        _splitModeComboBox.SelectedIndex = 0;
-
         var splitFileLabel = new Label
         {
             AutoSize = true,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
-            Text = "分割ファイル"
+            Text = "分割補助"
         };
 
         var splitFilePanel = new FlowLayoutPanel
@@ -285,22 +287,20 @@ public sealed class MainForm : Form
             WrapContents = true
         };
 
-        ConfigureRelationshipCheckBox(_includeSplitOverviewCheckBox, "全体図も出力", checkedByDefault: true);
         ConfigureRelationshipCheckBox(_includeSplitIndexCheckBox, "index.md を出力", checkedByDefault: true);
 
-        splitFilePanel.Controls.Add(_includeSplitOverviewCheckBox);
         splitFilePanel.Controls.Add(_includeSplitIndexCheckBox);
 
-        panel.Controls.Add(displayLabel, 0, 0);
-        panel.Controls.Add(_displayModeComboBox, 1, 0);
-        panel.Controls.Add(relationshipLabel, 0, 1);
-        panel.Controls.Add(relationshipPanel, 1, 1);
-        panel.Controls.Add(relatedLabel, 0, 2);
-        panel.Controls.Add(relatedPanel, 1, 2);
-        panel.Controls.Add(splitLabel, 0, 3);
-        panel.Controls.Add(_splitOutputCheckBox, 1, 3);
-        panel.Controls.Add(splitModeLabel, 0, 4);
-        panel.Controls.Add(_splitModeComboBox, 1, 4);
+        panel.Controls.Add(outputFormatLabel, 0, 0);
+        panel.Controls.Add(_outputFormatComboBox, 1, 0);
+        panel.Controls.Add(displayLabel, 0, 1);
+        panel.Controls.Add(_displayModeComboBox, 1, 1);
+        panel.Controls.Add(relationshipLabel, 0, 2);
+        panel.Controls.Add(relationshipPanel, 1, 2);
+        panel.Controls.Add(relatedLabel, 0, 3);
+        panel.Controls.Add(relatedPanel, 1, 3);
+        panel.Controls.Add(splitLabel, 0, 4);
+        panel.Controls.Add(_splitOutputCheckBox, 1, 4);
         panel.Controls.Add(splitFileLabel, 0, 5);
         panel.Controls.Add(splitFilePanel, 1, 5);
 
@@ -579,11 +579,14 @@ public sealed class MainForm : Form
 
     private void BrowseOutputPath(object? sender, EventArgs e)
     {
+        var outputFormat = GetSelectedOutputFormat();
         using var dialog = new SaveFileDialog
         {
             Title = "出力先を選択",
-            Filter = "Mermaid files (*.mmd)|*.mmd|Markdown files (*.md)|*.md|All files (*.*)|*.*",
-            DefaultExt = "mmd",
+            Filter = outputFormat == DiagramOutputFormat.Excel
+                ? "Excel files (*.xlsx)|*.xlsx|All files (*.*)|*.*"
+                : "Mermaid files (*.mmd)|*.mmd|All files (*.*)|*.*",
+            DefaultExt = outputFormat == DiagramOutputFormat.Excel ? "xlsx" : "mmd",
             OverwritePrompt = true
         };
 
@@ -649,7 +652,7 @@ public sealed class MainForm : Form
         _generationCancellation = new CancellationTokenSource();
         SetRunning(true);
         ResetProgress();
-        AppendLog("Generating Mermaid class diagram...");
+        AppendLog("Generating class diagram...");
 
         try
         {
@@ -659,7 +662,7 @@ public sealed class MainForm : Form
 
             _mermaidTextBox.Text = result.Mermaid;
             _outputLabel.Text = result.OutputPaths.Count > 1
-                ? $"出力: {result.OutputPath} ({result.OutputPaths.Count} files)"
+                ? $"出力: {result.OutputPath} ({result.OutputPaths.Count} outputs)"
                 : $"出力: {result.OutputPath}";
             _stageLabel.Text = "完了";
             _messageLabel.Text = $"生成完了: {result.TypeCount} types, {result.RelationshipCount} relationships";
@@ -701,6 +704,7 @@ public sealed class MainForm : Form
         var searchFolder = _searchFolderTextBox.Text.Trim();
         var searchFile = _searchFileTextBox.Text.Trim();
         var outputPath = _outputPathTextBox.Text.Trim();
+        var outputFormat = GetSelectedOutputFormat();
 
         if (string.IsNullOrWhiteSpace(projectFile))
         {
@@ -723,6 +727,8 @@ public sealed class MainForm : Form
             return false;
         }
 
+        outputPath = EnsureOutputExtension(outputPath, outputFormat);
+
         request = new GenerationRequest(
             projectFile,
             searchFolder,
@@ -734,13 +740,13 @@ public sealed class MainForm : Form
                 IncludeInheritance: _includeInheritanceCheckBox.Checked,
                 IncludeRealization: _includeRealizationCheckBox.Checked,
                 IncludeAssociation: _includeAssociationCheckBox.Checked,
-                IncludeDependency: _includeDependencyCheckBox.Checked)
+                IncludeDependency: _includeDependencyCheckBox.Checked,
+                OutputFormat: outputFormat)
             {
                 SplitOutput = new DiagramSplitOptions(
                     Enabled: _splitOutputCheckBox.Checked,
-                    Mode: GetSelectedSplitMode(),
-                    IncludeOverview: _includeSplitOverviewCheckBox.Checked,
-                    IncludeIndex: _includeSplitIndexCheckBox.Checked),
+                    IncludeOverview: false,
+                    IncludeIndex: outputFormat == DiagramOutputFormat.Mermaid && _includeSplitIndexCheckBox.Checked),
                 RelatedTypes = new RelatedTypeOptions(
                     Enabled: _includeRelatedTypesCheckBox.Checked,
                     Depth: (int)_relatedDepthNumericUpDown.Value,
@@ -749,6 +755,15 @@ public sealed class MainForm : Form
             }
         };
         return true;
+    }
+
+    private DiagramOutputFormat GetSelectedOutputFormat()
+    {
+        return _outputFormatComboBox.SelectedIndex switch
+        {
+            1 => DiagramOutputFormat.Excel,
+            _ => DiagramOutputFormat.Mermaid
+        };
     }
 
     private DiagramDisplayMode GetSelectedDisplayMode()
@@ -761,21 +776,24 @@ public sealed class MainForm : Form
         };
     }
 
-    private DiagramSplitMode GetSelectedSplitMode()
+    private static string EnsureOutputExtension(string outputPath, DiagramOutputFormat outputFormat)
     {
-        return _splitModeComboBox.SelectedIndex switch
+        var expectedExtension = outputFormat == DiagramOutputFormat.Excel ? ".xlsx" : ".mmd";
+        var currentExtension = Path.GetExtension(outputPath);
+        if (string.IsNullOrWhiteSpace(currentExtension))
         {
-            1 => DiagramSplitMode.Folder,
-            _ => DiagramSplitMode.Namespace
-        };
+            return $"{outputPath}{expectedExtension}";
+        }
+
+        return string.Equals(currentExtension, expectedExtension, StringComparison.OrdinalIgnoreCase)
+            ? outputPath
+            : Path.ChangeExtension(outputPath, expectedExtension);
     }
 
     private void UpdateSplitOptionState()
     {
         var enabled = _splitOutputCheckBox.Checked;
-        _splitModeComboBox.Enabled = enabled;
-        _includeSplitOverviewCheckBox.Enabled = enabled;
-        _includeSplitIndexCheckBox.Enabled = enabled;
+        _includeSplitIndexCheckBox.Enabled = enabled && GetSelectedOutputFormat() == DiagramOutputFormat.Mermaid;
     }
 
     private void UpdateRelatedOptionState()
@@ -784,6 +802,11 @@ public sealed class MainForm : Form
         _unlimitedRelatedDepthCheckBox.Enabled = enabled;
         _relatedDepthNumericUpDown.Enabled = enabled && !_unlimitedRelatedDepthCheckBox.Checked;
         _showReferencedMembersOnlyCheckBox.Enabled = enabled;
+    }
+
+    private void UpdateOutputFormatState()
+    {
+        UpdateSplitOptionState();
     }
 
     private void ShowValidationError(string message)
