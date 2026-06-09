@@ -1,13 +1,10 @@
+using System.Diagnostics;
 using ClassDiagramMaker.Analysis;
 
 namespace ClassDiagramMaker;
 
 public sealed class MainForm : Form
 {
-    private const int PreferredLogPanelHeight = 190;
-    private const int PreferredLogPanelMinHeight = 120;
-    private const int PreferredMermaidPanelMinHeight = 220;
-
     private readonly ClassDiagramService _service;
     private readonly TextBox _projectFolderTextBox = new();
     private readonly TextBox _searchFolderTextBox = new();
@@ -24,8 +21,6 @@ public sealed class MainForm : Form
     private readonly CheckBox _unlimitedRelatedDepthCheckBox = new();
     private readonly CheckBox _showReferencedMembersOnlyCheckBox = new();
     private readonly CheckBox _splitOutputCheckBox = new();
-    private readonly ComboBox _splitModeComboBox = new();
-    private readonly CheckBox _includeSplitOverviewCheckBox = new();
     private readonly CheckBox _includeSplitIndexCheckBox = new();
     private readonly Button _generateButton = new();
     private readonly Button _cancelButton = new();
@@ -34,9 +29,9 @@ public sealed class MainForm : Form
     private readonly Label _messageLabel = new();
     private readonly Label _fileCountLabel = new();
     private readonly Label _outputLabel = new();
-    private readonly TextBox _logTextBox = new();
-    private readonly TextBox _mermaidTextBox = new();
+    private readonly Button _openOutputFolderButton = new();
     private CancellationTokenSource? _generationCancellation;
+    private string? _lastOutputDirectory;
 
     public MainForm(ClassDiagramService service)
     {
@@ -47,34 +42,32 @@ public sealed class MainForm : Form
     private void InitializeComponent()
     {
         Text = "ClassDiagramMaker";
-        MinimumSize = new Size(980, 720);
+        MinimumSize = new Size(980, 520);
         StartPosition = FormStartPosition.CenterScreen;
 
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 3,
             Padding = new Padding(14)
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         var inputPanel = BuildInputPanel();
         var optionsPanel = BuildOptionsPanel();
         var progressPanel = BuildProgressPanel();
-        var outputSplit = BuildOutputSplit();
 
         root.Controls.Add(inputPanel, 0, 0);
         root.Controls.Add(optionsPanel, 0, 1);
         root.Controls.Add(progressPanel, 0, 2);
-        root.Controls.Add(outputSplit, 0, 3);
         Controls.Add(root);
 
         _generateButton.Click += GenerateButton_Click;
         _cancelButton.Click += CancelButton_Click;
+        _openOutputFolderButton.Click += OpenOutputFolderButton_Click;
     }
 
     private Control BuildInputPanel()
@@ -389,6 +382,12 @@ public sealed class MainForm : Form
         _outputLabel.Dock = DockStyle.Fill;
         _outputLabel.ForeColor = SystemColors.GrayText;
 
+        _openOutputFolderButton.Text = "出力フォルダを開く";
+        _openOutputFolderButton.AutoSize = true;
+        _openOutputFolderButton.Dock = DockStyle.Right;
+        _openOutputFolderButton.Enabled = false;
+        _openOutputFolderButton.MinimumSize = new Size(150, 30);
+
         panel.Controls.Add(_stageLabel, 0, 0);
         panel.Controls.Add(_fileCountLabel, 1, 0);
         panel.Controls.Add(_messageLabel, 0, 1);
@@ -396,118 +395,8 @@ public sealed class MainForm : Form
         panel.Controls.Add(_progressBar, 0, 2);
         panel.SetColumnSpan(_progressBar, 2);
         panel.Controls.Add(_outputLabel, 0, 3);
-        panel.SetColumnSpan(_outputLabel, 2);
+        panel.Controls.Add(_openOutputFolderButton, 1, 3);
 
-        return panel;
-    }
-
-    private Control BuildOutputSplit()
-    {
-        var split = new SplitContainer
-        {
-            Dock = DockStyle.Fill,
-            Orientation = Orientation.Horizontal
-        };
-        var splitterInitialized = false;
-        var configuringSplitter = false;
-
-        split.HandleCreated += (_, _) =>
-        {
-            configuringSplitter = true;
-            try
-            {
-                splitterInitialized = ConfigureOutputSplit(split, usePreferredDistance: !splitterInitialized) || splitterInitialized;
-            }
-            finally
-            {
-                configuringSplitter = false;
-            }
-        };
-        split.SizeChanged += (_, _) =>
-        {
-            configuringSplitter = true;
-            try
-            {
-                splitterInitialized = ConfigureOutputSplit(split, usePreferredDistance: !splitterInitialized) || splitterInitialized;
-            }
-            finally
-            {
-                configuringSplitter = false;
-            }
-        };
-        split.SplitterMoved += (_, _) =>
-        {
-            if (!configuringSplitter)
-            {
-                splitterInitialized = true;
-            }
-        };
-
-        split.Panel1.Controls.Add(BuildTextSection("ログ", _logTextBox, readOnly: true));
-        split.Panel2.Controls.Add(BuildTextSection("Mermaid", _mermaidTextBox, readOnly: false));
-        return split;
-    }
-
-    private static bool ConfigureOutputSplit(SplitContainer split, bool usePreferredDistance)
-    {
-        var availableHeight = split.Height - split.SplitterWidth;
-        if (availableHeight <= 0)
-        {
-            return false;
-        }
-
-        var panel1MinSize = Math.Min(PreferredLogPanelMinHeight, Math.Max(0, availableHeight / 3));
-        var panel2MinSize = Math.Min(PreferredMermaidPanelMinHeight, Math.Max(0, availableHeight - panel1MinSize));
-        var minDistance = panel1MinSize;
-        var maxDistance = availableHeight - panel2MinSize;
-        if (maxDistance < minDistance)
-        {
-            panel2MinSize = Math.Max(0, availableHeight - panel1MinSize);
-            maxDistance = availableHeight - panel2MinSize;
-        }
-
-        split.Panel1MinSize = 0;
-        split.Panel2MinSize = 0;
-
-        var preferredDistance = Math.Min(PreferredLogPanelHeight, availableHeight / 2);
-        var distance = usePreferredDistance
-            ? preferredDistance
-            : split.SplitterDistance;
-        split.SplitterDistance = Math.Clamp(distance, minDistance, maxDistance);
-        split.Panel1MinSize = panel1MinSize;
-        split.Panel2MinSize = panel2MinSize;
-        return usePreferredDistance && preferredDistance >= minDistance && preferredDistance <= maxDistance;
-    }
-
-    private static Control BuildTextSection(string title, TextBox textBox, bool readOnly)
-    {
-        var panel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2
-        };
-        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-
-        var label = new Label
-        {
-            Text = title,
-            AutoSize = true,
-            Dock = DockStyle.Fill,
-            Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
-            Padding = new Padding(0, 0, 0, 4)
-        };
-
-        textBox.Dock = DockStyle.Fill;
-        textBox.Multiline = true;
-        textBox.ScrollBars = ScrollBars.Both;
-        textBox.WordWrap = false;
-        textBox.ReadOnly = readOnly;
-        textBox.Font = new Font("Consolas", 10);
-
-        panel.Controls.Add(label, 0, 0);
-        panel.Controls.Add(textBox, 0, 1);
         return panel;
     }
 
@@ -652,7 +541,6 @@ public sealed class MainForm : Form
         _generationCancellation = new CancellationTokenSource();
         SetRunning(true);
         ResetProgress();
-        AppendLog("Generating class diagram...");
 
         try
         {
@@ -660,29 +548,24 @@ public sealed class MainForm : Form
             var result = await Task.Run(
                 () => _service.GenerateAsync(request, progress, _generationCancellation.Token));
 
-            _mermaidTextBox.Text = result.Mermaid;
             _outputLabel.Text = result.OutputPaths.Count > 1
                 ? $"出力: {result.OutputPath} ({result.OutputPaths.Count} outputs)"
                 : $"出力: {result.OutputPath}";
+            _lastOutputDirectory = Path.GetDirectoryName(result.OutputPath);
+            _openOutputFolderButton.Enabled = !string.IsNullOrWhiteSpace(_lastOutputDirectory) &&
+                Directory.Exists(_lastOutputDirectory);
             _stageLabel.Text = "完了";
             _messageLabel.Text = $"生成完了: {result.TypeCount} types, {result.RelationshipCount} relationships";
-            AppendLog($"Wrote {result.OutputPath}");
-            foreach (var outputPath in result.OutputPaths.Skip(1))
-            {
-                AppendLog($"Wrote {outputPath}");
-            }
         }
         catch (OperationCanceledException)
         {
             _stageLabel.Text = "キャンセル";
             _messageLabel.Text = "処理をキャンセルしました。";
-            AppendLog("Canceled.");
         }
         catch (Exception ex)
         {
             _stageLabel.Text = "失敗";
             _messageLabel.Text = ex.Message;
-            AppendLog(ex.ToString());
             MessageBox.Show(this, ex.Message, "生成に失敗しました", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
@@ -696,6 +579,29 @@ public sealed class MainForm : Form
     private void CancelButton_Click(object? sender, EventArgs e)
     {
         _generationCancellation?.Cancel();
+    }
+
+    private void OpenOutputFolderButton_Click(object? sender, EventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_lastOutputDirectory) || !Directory.Exists(_lastOutputDirectory))
+        {
+            MessageBox.Show(this, "出力フォルダが見つかりません。", "出力フォルダを開けません", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            _openOutputFolderButton.Enabled = false;
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = _lastOutputDirectory,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "出力フォルダを開けません", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private bool TryCreateRequest(out GenerationRequest request)
@@ -728,6 +634,7 @@ public sealed class MainForm : Form
         }
 
         outputPath = EnsureOutputExtension(outputPath, outputFormat);
+        _outputPathTextBox.Text = outputPath;
 
         request = new GenerationRequest(
             projectFile,
@@ -806,7 +713,23 @@ public sealed class MainForm : Form
 
     private void UpdateOutputFormatState()
     {
+        UpdateOutputPathExtension();
         UpdateSplitOptionState();
+    }
+
+    private void UpdateOutputPathExtension()
+    {
+        var outputPath = _outputPathTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            return;
+        }
+
+        var updatedPath = EnsureOutputExtension(outputPath, GetSelectedOutputFormat());
+        if (!string.Equals(outputPath, updatedPath, StringComparison.Ordinal))
+        {
+            _outputPathTextBox.Text = updatedPath;
+        }
     }
 
     private void ShowValidationError(string message)
@@ -820,7 +743,6 @@ public sealed class MainForm : Form
         _messageLabel.Text = progress.Message;
         _fileCountLabel.Text = $"{progress.ProcessedFiles} / {progress.TotalFiles} files";
         _progressBar.Value = Math.Clamp(progress.Percent, _progressBar.Minimum, _progressBar.Maximum);
-        AppendLog(progress.Message);
     }
 
     private void ResetProgress()
@@ -830,24 +752,17 @@ public sealed class MainForm : Form
         _messageLabel.Text = "開始しています...";
         _fileCountLabel.Text = "0 / 0 files";
         _outputLabel.Text = "出力なし";
-        _logTextBox.Clear();
-        _mermaidTextBox.Clear();
+        _lastOutputDirectory = null;
+        _openOutputFolderButton.Enabled = false;
     }
 
     private void SetRunning(bool running)
     {
         _generateButton.Enabled = !running;
         _cancelButton.Enabled = running;
+        _openOutputFolderButton.Enabled = !running &&
+            !string.IsNullOrWhiteSpace(_lastOutputDirectory) &&
+            Directory.Exists(_lastOutputDirectory);
         Cursor = running ? Cursors.WaitCursor : Cursors.Default;
-    }
-
-    private void AppendLog(string message)
-    {
-        if (string.IsNullOrWhiteSpace(message))
-        {
-            return;
-        }
-
-        _logTextBox.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}");
     }
 }

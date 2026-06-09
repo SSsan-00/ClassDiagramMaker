@@ -161,15 +161,10 @@ classDiagram
     UserService --> UserRepository : repository
 ```
 
-Excel 出力では、同じ解析結果を 1 シート内に次の構造で配置します。
+Excel 出力では、同じ解析結果を 1 シート内に Excel ネイティブ図形として配置します。
+クラスは矩形のクラスボックス、関係は矢印付きコネクタで描画され、セルベースの一覧表は出力しません。
 
-- Diagram: クラスブロック
-- Types: 型一覧
-- Members: メンバー一覧
-- Relationships: 関係一覧
-- Mermaid: 同じ範囲の Mermaid テキスト
-
-Excel 分割出力では、この構造を 1 クラス 1 シートで作成します。
+Excel 分割出力では、この図形クラス図を 1 クラス 1 シートで作成します。
 
 ## Bootstrap
 

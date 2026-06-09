@@ -1,7 +1,10 @@
 using ClassDiagramMaker.Analysis;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
+using DocumentFormat.OpenXml.Validation;
 using Xunit;
+using A = DocumentFormat.OpenXml.Drawing;
+using Xdr = DocumentFormat.OpenXml.Drawing.Spreadsheet;
 
 namespace ClassDiagramMaker.Core.Tests;
 
@@ -1404,7 +1407,7 @@ public sealed class ClassDiagramServiceTests
     }
 
     [Fact]
-    public async Task GenerateAsync_WhenExcelOutputIsSelected_WritesSingleSheetWorkbook()
+    public async Task GenerateAsync_WhenExcelOutputIsSelected_WritesShapeDrawingWorkbook()
     {
         using var workspace = TestWorkspace.Create();
         workspace.WriteSource(
@@ -1448,11 +1451,14 @@ public sealed class ClassDiagramServiceTests
         Assert.Equal(outputPath, result.OutputPath);
         Assert.Equal(new[] { outputPath }, result.OutputPaths);
         Assert.Equal(new[] { "ClassDiagram" }, GetWorksheetNames(outputPath));
+        AssertWorkbookIsValid(outputPath);
 
-        var workbookText = ReadWorkbookText(outputPath);
-        Assert.Contains("Demo.Services.UserService", workbookText);
-        Assert.Contains("UserService --> UserRepository : repository", workbookText);
-        Assert.Contains("UserService ..> UserDto : Create", workbookText);
+        var drawingText = ReadDrawingText(outputPath);
+        Assert.Contains("UserService", drawingText);
+        Assert.Contains("+Create(command: CreateUserCommand): UserDto", drawingText);
+        Assert.Contains("repository", drawingText);
+        Assert.Contains("Create", drawingText);
+        Assert.Empty(ReadWorkbookText(outputPath));
     }
 
     [Fact]
@@ -1500,14 +1506,15 @@ public sealed class ClassDiagramServiceTests
 
         Assert.Equal(outputPath, result.OutputPath);
         Assert.Equal(new[] { outputPath }, result.OutputPaths);
+        AssertWorkbookIsValid(outputPath);
 
         var sheetNames = GetWorksheetNames(outputPath);
         Assert.Equal(new[] { "User", "UserService" }, sheetNames.OrderBy(name => name, StringComparer.Ordinal).ToArray());
 
-        var workbookText = ReadWorkbookText(outputPath);
-        Assert.Contains("Demo.Application.UserService", workbookText);
-        Assert.Contains("Demo.Domain.User", workbookText);
-        Assert.Contains("UserService ..> User : Find", workbookText);
+        var drawingText = ReadDrawingText(outputPath);
+        Assert.Contains("UserService", drawingText);
+        Assert.Contains("User", drawingText);
+        Assert.Contains("Find", drawingText);
     }
 
     [Fact]
@@ -1549,6 +1556,158 @@ public sealed class ClassDiagramServiceTests
             CancellationToken.None);
 
         Assert.Equal(new[] { "User", "User_2" }, GetWorksheetNames(outputPath));
+        AssertWorkbookIsValid(outputPath);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WhenExcelOutputUsesTypeOnly_OmitsMembersFromShapes()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "User.cs",
+            """
+            namespace Demo;
+
+            public sealed class User
+            {
+                public string Name { get; }
+            }
+            """);
+        var outputPath = workspace.GetOutputPath(".xlsx");
+
+        await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, outputPath)
+            {
+                Options = new DiagramGenerationOptions(
+                    DisplayMode: DiagramDisplayMode.TypeOnly,
+                    OutputFormat: DiagramOutputFormat.Excel)
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        var drawingText = ReadDrawingText(outputPath);
+        Assert.Contains("User", drawingText);
+        Assert.DoesNotContain("+Name: string", drawingText);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WhenExcelOutputUsesKeyMembers_OmitsMethodsFromShapes()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "User.cs",
+            """
+            namespace Demo;
+
+            public sealed class User
+            {
+                public string Name { get; }
+
+                public void Save()
+                {
+                }
+            }
+            """);
+        var outputPath = workspace.GetOutputPath(".xlsx");
+
+        await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, outputPath)
+            {
+                Options = new DiagramGenerationOptions(
+                    DisplayMode: DiagramDisplayMode.KeyMembers,
+                    OutputFormat: DiagramOutputFormat.Excel)
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        var drawingText = ReadDrawingText(outputPath);
+        Assert.Contains("+Name: string", drawingText);
+        Assert.DoesNotContain("+Save(): void", drawingText);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WhenExcelOutputHasRelationships_RendersLineStylesAndArrowheads()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Model.cs",
+            """
+            namespace Demo;
+
+            public interface IUserRepository
+            {
+            }
+
+            public abstract class ServiceBase
+            {
+            }
+
+            public sealed class UserService : ServiceBase, IUserRepository
+            {
+                private readonly UserRepository repository;
+
+                public UserDto Create(CreateUserCommand command) => new();
+            }
+
+            public sealed class UserRepository
+            {
+            }
+
+            public sealed class UserDto
+            {
+            }
+
+            public sealed class CreateUserCommand
+            {
+            }
+            """);
+        var outputPath = workspace.GetOutputPath(".xlsx");
+
+        await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, outputPath)
+            {
+                Options = new DiagramGenerationOptions
+                {
+                    OutputFormat = DiagramOutputFormat.Excel
+                }
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        var drawingXml = ReadDrawingXml(outputPath);
+        Assert.Contains("headEnd type=\"triangle\"", drawingXml);
+        Assert.Contains("headEnd type=\"arrow\"", drawingXml);
+        Assert.Contains("prstDash val=\"dash\"", drawingXml);
+
+        var connectorCount = GetDrawingConnectionShapeCount(outputPath);
+        Assert.True(connectorCount >= 4);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WhenExcelOutputHasNoTypes_WritesEmptyDrawingMessage()
+    {
+        using var workspace = TestWorkspace.Create();
+        workspace.WriteSource(
+            "Empty.cs",
+            """
+            namespace Demo;
+            """);
+        var outputPath = workspace.GetOutputPath(".xlsx");
+
+        await new ClassDiagramService().GenerateAsync(
+            new GenerationRequest(workspace.Root, workspace.Root, null, outputPath)
+            {
+                Options = new DiagramGenerationOptions
+                {
+                    OutputFormat = DiagramOutputFormat.Excel
+                }
+            },
+            new Progress<GenerationProgress>(),
+            CancellationToken.None);
+
+        Assert.Equal(new[] { "ClassDiagram" }, GetWorksheetNames(outputPath));
+        Assert.Contains("No classes found", ReadDrawingText(outputPath));
+        AssertWorkbookIsValid(outputPath);
     }
 
     private static string GetClassBlock(string mermaid, string classId)
@@ -1587,6 +1746,17 @@ public sealed class ClassDiagramServiceTests
             .ToArray();
     }
 
+    private static void AssertWorkbookIsValid(string path)
+    {
+        using var document = SpreadsheetDocument.Open(path, false);
+        var validationErrors = new OpenXmlValidator()
+            .Validate(document)
+            .Select(error => $"{error.Path?.XPath}: {error.Description}")
+            .ToArray();
+
+        Assert.Empty(validationErrors);
+    }
+
     private static string ReadWorkbookText(string path)
     {
         using var document = SpreadsheetDocument.Open(path, false);
@@ -1621,6 +1791,41 @@ public sealed class ClassDiagramServiceTests
         }
 
         return cell.CellValue?.Text ?? string.Empty;
+    }
+
+    private static string ReadDrawingText(string path)
+    {
+        using var document = SpreadsheetDocument.Open(path, false);
+        return string.Join(
+            Environment.NewLine,
+            document.WorkbookPart!
+                .WorksheetParts
+                .Select(part => part.DrawingsPart?.WorksheetDrawing)
+                .Where(drawing => drawing is not null)
+                .SelectMany(drawing => drawing!.Descendants<A.Text>())
+                .Select(text => text.Text)
+                .Where(value => !string.IsNullOrWhiteSpace(value)));
+    }
+
+    private static string ReadDrawingXml(string path)
+    {
+        using var document = SpreadsheetDocument.Open(path, false);
+        return string.Join(
+            Environment.NewLine,
+            document.WorkbookPart!
+                .WorksheetParts
+                .Select(part => part.DrawingsPart?.WorksheetDrawing?.OuterXml)
+                .Where(value => !string.IsNullOrWhiteSpace(value)));
+    }
+
+    private static int GetDrawingConnectionShapeCount(string path)
+    {
+        using var document = SpreadsheetDocument.Open(path, false);
+        return document.WorkbookPart!
+            .WorksheetParts
+            .Select(part => part.DrawingsPart?.WorksheetDrawing)
+            .Where(drawing => drawing is not null)
+            .Sum(drawing => drawing!.Descendants<Xdr.ConnectionShape>().Count());
     }
 
     private static void AssertClassBodyLinesDoNotContain(string mermaid, string unexpected)
